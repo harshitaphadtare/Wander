@@ -1,0 +1,2 @@
+# Copy to .dev.vars for local `npm run dev` (never commit .dev.vars)
+ORS_API_KEY=your-openrouteservice-key

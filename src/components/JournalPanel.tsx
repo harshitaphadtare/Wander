@@ -1,0 +1,138 @@
+import { ChevronRight, Flame, Footprints, X } from 'lucide-react'
+import { motion } from 'motion/react'
+import { useMemo } from 'react'
+import type { PlaceWithStats } from '../hooks/useData'
+import type { Visit } from '../lib/db'
+import { dayLabel, duration, startOfDay, timeOfDay } from '../lib/format'
+import { PERIOD_OPTIONS, periodStart, type Period } from '../lib/periods'
+import { deleteVisit } from '../lib/places'
+import { CountUp, EmptyState, IconTile, Segmented, Stagger } from '../ui/bits'
+import { useConfirm } from '../ui/Confirm'
+import { categoryIcon } from '../ui/icons'
+import Sheet from '../ui/Sheet'
+
+interface Props {
+  visits: Visit[]
+  places: PlaceWithStats[]
+  period: Period
+  onPeriod(period: Period): void
+  onPick(place: PlaceWithStats): void
+  /** Show this period's visits as a heatmap on the map. */
+  onHeatmap(): void
+  onClose(): void
+}
+
+export default function JournalPanel({ visits, places, period, onPeriod, onPick, onHeatmap, onClose }: Props) {
+  const confirm = useConfirm()
+  const byId = useMemo(() => new Map(places.map((p) => [p.id, p])), [places])
+
+  const { inPeriod, groups, newPlaces } = useMemo(() => {
+    const from = periodStart(period)
+    const inPeriod = visits.filter((v) => v.arrivedAt >= from && byId.has(v.placeId))
+
+    // A place is "new" this period if its first-ever visit falls inside it.
+    const firstVisit = new Map<string, number>()
+    for (const v of visits) firstVisit.set(v.placeId, Math.min(firstVisit.get(v.placeId) ?? Infinity, v.arrivedAt))
+    const newPlaces = [...firstVisit.entries()].filter(([id, t]) => t >= from && byId.has(id)).length
+
+    const groups: { day: number; visits: Visit[] }[] = []
+    for (const v of inPeriod) {
+      const day = startOfDay(v.arrivedAt)
+      const last = groups.at(-1)
+      if (last?.day === day) last.visits.push(v)
+      else groups.push({ day, visits: [v] })
+    }
+    return { inPeriod, groups, newPlaces }
+  }, [visits, period, byId])
+
+  const uniquePlaces = new Set(inPeriod.map((v) => v.placeId)).size
+  let i = 0
+
+  const remove = async (v: Visit, name: string) => {
+    const ok = await confirm({
+      title: 'Delete this visit?',
+      message: `${name}, ${dayLabel(v.arrivedAt).toLowerCase()} at ${timeOfDay(v.arrivedAt)}.`,
+      confirmLabel: 'Delete',
+      destructive: true,
+    })
+    if (ok) await deleteVisit(v.id)
+  }
+
+  return (
+    <Sheet onClose={onClose} eyebrow="Where you've been" title="Journal">
+      <Segmented<Period> id="journal-period" value={period} onChange={onPeriod} options={PERIOD_OPTIONS} />
+
+      <div className="stat-cards">
+        <div className="stat-card">
+          <strong className="display num">
+            <CountUp value={inPeriod.length} />
+          </strong>
+          <small>Visits</small>
+        </div>
+        <div className="stat-card">
+          <strong className="display num">
+            <CountUp value={uniquePlaces} />
+          </strong>
+          <small>Places</small>
+        </div>
+        <div className="stat-card accent">
+          <strong className="display num">
+            <CountUp value={newPlaces} />
+          </strong>
+          <small>New spots</small>
+        </div>
+      </div>
+
+      {inPeriod.length > 0 && (
+        <motion.button className="heat-link" onClick={onHeatmap} whileTap={{ scale: 0.98 }}>
+          <span className="heat-link-icon" aria-hidden>
+            <Flame size={18} strokeWidth={2.3} />
+          </span>
+          <span className="row-text">
+            <strong>See your heatmap</strong>
+            <small>Where you spent time {period === 'all' ? 'overall' : `this ${period}`}</small>
+          </span>
+          <ChevronRight size={18} strokeWidth={2.2} aria-hidden />
+        </motion.button>
+      )}
+
+      {groups.length === 0 ? (
+        <EmptyState icon={Footprints} title="A blank page">
+          No visits {period === 'all' ? 'yet' : `this ${period}`}. Go wander, and check in when you find somewhere good.
+        </EmptyState>
+      ) : (
+        <div key={period}>
+          {groups.map((g) => (
+            <section key={g.day} className="day">
+              <h3 className="day-label">{dayLabel(g.day)}</h3>
+              <ul className="timeline">
+                {g.visits.map((v) => {
+                  const place = byId.get(v.placeId)!
+                  return (
+                    <Stagger key={v.id} index={i++} className="timeline-item">
+                      <span className="timeline-time">{timeOfDay(v.arrivedAt)}</span>
+                      <span className="timeline-node" style={{ background: place.level.color }} />
+                      <button className="timeline-card" onClick={() => onPick(place)}>
+                        <IconTile icon={categoryIcon(place.category)} color={place.level.color} size={34} />
+                        <span className="row-text">
+                          <strong>{place.name}</strong>
+                          <small>
+                            {v.source === 'auto' ? 'Auto-detected' : 'Checked in'}
+                            {v.leftAt ? ` · ${duration(v.leftAt - v.arrivedAt)}` : ''}
+                          </small>
+                        </span>
+                      </button>
+                      <button className="timeline-delete" aria-label="Delete visit" onClick={() => remove(v, place.name)}>
+                        <X size={14} strokeWidth={2.4} />
+                      </button>
+                    </Stagger>
+                  )
+                })}
+              </ul>
+            </section>
+          ))}
+        </div>
+      )}
+    </Sheet>
+  )
+}

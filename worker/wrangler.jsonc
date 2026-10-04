@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wander-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "observability": { "enabled": true },
+  "vars": {
+    // Add your deployed site URL here once you have it, e.g.
+    // "http://localhost:5173,https://wander-xyz.vercel.app,https://wander-*-yourname.vercel.app"
+    "ALLOWED_ORIGINS": "http://localhost:5173,http://localhost:4173"
+  }
+  // ORS_API_KEY is a secret: `npx wrangler secret put ORS_API_KEY`
+  // For local `npm run dev`, put it in worker/.dev.vars (see .dev.vars.example).
+}

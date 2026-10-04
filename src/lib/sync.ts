@@ -1,5 +1,6 @@
 import type { Session } from '@supabase/supabase-js'
 import { onLocalChange } from './changes'
+import { forgetKey, isSealed, keyFor, open, seal, type Sealed } from './crypto'
 import { db, getMeta, setMeta, SYNCED_TABLES, withoutDirty, type SyncedTable } from './db'
 import { mergeRows } from './merge'
 import { supabase } from './supabase'
@@ -13,7 +14,9 @@ import { supabase } from './supabase'
  * drift). Conflicts resolve last-write-wins on the row's `updatedAt`.
  *
  * Server side it's one generic `records` table (see supabase/schema.sql) holding
- * each row as JSON, so new fields or tables need no migrations.
+ * each row as JSON, so new fields or tables need no migrations. The JSON is
+ * encrypted on the device first (lib/crypto.ts); only ids, timestamps and the
+ * deleted flag travel in the clear, because the sync cursor needs them.
  */
 
 export type SyncStatus = 'disabled' | 'signed-out' | 'idle' | 'syncing' | 'offline' | 'error'
@@ -52,7 +55,7 @@ interface RecordRow {
   id: string
   user_id: string
   table_name: SyncedTable
-  data: Record<string, unknown> & { id: string; updatedAt: number }
+  data: unknown
   updated_at: number
   deleted: boolean
   server_updated_at: string
@@ -60,22 +63,25 @@ interface RecordRow {
 
 const PAGE = 500
 
-async function push(userId: string) {
+type LocalRow = Record<string, unknown> & { id: string; updatedAt: number; deleted?: number }
+
+async function push(userId: string, key: CryptoKey) {
   for (const table of SYNCED_TABLES) {
     const t = db.table(table)
-    const dirty = (await t.where('dirty').equals(1).toArray()) as RecordRow['data'][]
+    const dirty = (await t.where('dirty').equals(1).toArray()) as LocalRow[]
     for (let i = 0; i < dirty.length; i += PAGE) {
       const batch = dirty.slice(i, i + PAGE)
-      const { error } = await supabase!.from('records').upsert(
-        batch.map(withoutDirty).map((data) => ({
+      const rows = await Promise.all(
+        batch.map((row) => withoutDirty(row) as LocalRow).map(async (data) => ({
           id: data.id,
           user_id: userId,
           table_name: table,
-          data,
+          data: await seal(key, table, data.id, data),
           updated_at: data.updatedAt,
           deleted: !!data.deleted,
         })),
       )
+      const { error } = await supabase!.from('records').upsert(rows)
       if (error) throw error
       // Clear the flag only if the row wasn't edited again while we were pushing.
       await db.transaction('rw', t, async () => {
@@ -91,7 +97,7 @@ async function push(userId: string) {
   }
 }
 
-async function pull() {
+async function pull(key: CryptoKey) {
   // Small overlap so a row committed out of order isn't skipped; merging is idempotent.
   const cursor = await getMeta<string | null>('sync:pullCursor', null)
   let since = cursor ? new Date(new Date(cursor).getTime() - 5_000).toISOString() : '1970-01-01T00:00:00Z'
@@ -108,14 +114,21 @@ async function pull() {
     const rows = data as RecordRow[]
     if (rows.length === 0) break
 
-    const byTable = new Map<SyncedTable, RecordRow['data'][]>()
+    // Rows written before encryption existed are still plaintext on the server.
+    // Merge those as dirty so the next push replaces them with ciphertext.
+    const sealed = new Map<SyncedTable, LocalRow[]>()
+    const legacy = new Map<SyncedTable, LocalRow[]>()
     for (const r of rows) {
       if (!SYNCED_TABLES.includes(r.table_name)) continue
-      const list = byTable.get(r.table_name) ?? []
-      list.push({ ...r.data, id: r.id, updatedAt: r.updated_at, deleted: r.deleted ? 1 : 0 })
-      byTable.set(r.table_name, list)
+      const isNew = isSealed(r.data)
+      const data = isNew ? await open<LocalRow>(key, r.table_name, r.id, r.data as Sealed) : (r.data as LocalRow)
+      const bucket = isNew ? sealed : legacy
+      const list = bucket.get(r.table_name) ?? []
+      list.push({ ...data, id: r.id, updatedAt: r.updated_at, deleted: r.deleted ? 1 : 0 })
+      bucket.set(r.table_name, list)
     }
-    for (const [table, list] of byTable) await mergeRows(table, list, false)
+    for (const [table, list] of sealed) await mergeRows(table, list, false)
+    for (const [table, list] of legacy) if ((await mergeRows(table, list, true)) > 0) again = true
 
     newest = rows[rows.length - 1].server_updated_at
     since = newest
@@ -132,8 +145,9 @@ async function runSync() {
   }
   setState({ status: 'syncing', error: undefined })
   try {
-    await push(session.user.id)
-    await pull()
+    const key = await keyFor(session.user.id)
+    await push(session.user.id, key)
+    await pull(key)
     setState({ status: 'idle', lastSyncedAt: Date.now() })
   } catch (err) {
     setState({ status: 'error', error: err instanceof Error ? err.message : String((err as { message?: string }).message ?? err) })
@@ -160,15 +174,23 @@ function scheduleSync(delay = 2_000) {
   debounce = setTimeout(() => void syncNow(), delay)
 }
 
-/** If a different account signs in, re-upload everything and pull from scratch. */
+/**
+ * If a different account signs in, re-upload everything and pull from scratch.
+ * The same happens once for accounts that synced before encryption existed, so
+ * their plaintext rows on the server get replaced with ciphertext.
+ */
 async function onSignedIn(s: Session) {
   const lastUser = await getMeta<string | null>('sync:userId', null)
-  if (lastUser !== s.user.id) {
+  const encryptedFor = await getMeta<string | null>('sync:encryptedFor', null)
+  if (lastUser !== s.user.id || encryptedFor !== s.user.id) {
     await db.transaction('rw', SYNCED_TABLES.map((t) => db.table(t)), async () => {
       for (const t of SYNCED_TABLES) await db.table(t).toCollection().modify({ dirty: 1 })
     })
     await setMeta('sync:pullCursor', null)
     await setMeta('sync:userId', s.user.id)
+    await syncNow()
+    if (syncStore.get().status === 'idle') await setMeta('sync:encryptedFor', s.user.id)
+    return
   }
   void syncNow()
 }
@@ -181,6 +203,7 @@ export function startSync() {
   supabase.auth.onAuthStateChange((event, s) => {
     session = s
     if (!s) {
+      forgetKey()
       setState({ status: 'signed-out', email: undefined })
       return
     }
@@ -197,20 +220,4 @@ export function startSync() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') scheduleSync(500)
   })
-}
-
-export async function sendLoginCode(email: string) {
-  if (!supabase) throw new Error('Sync is not configured.')
-  const { error } = await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser: true } })
-  if (error) throw error
-}
-
-export async function verifyLoginCode(email: string, token: string) {
-  if (!supabase) throw new Error('Sync is not configured.')
-  const { error } = await supabase.auth.verifyOtp({ email, token, type: 'email' })
-  if (error) throw error
-}
-
-export async function signOut() {
-  await supabase?.auth.signOut()
 }

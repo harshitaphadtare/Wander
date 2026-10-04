@@ -52,13 +52,22 @@ function toPlace(f: PhotonFeature): PhotonPlace {
 export async function searchPlaces(query: string, near?: LatLng, signal?: AbortSignal): Promise<PhotonPlace[]> {
   const params = new URLSearchParams({ q: query, limit: '8', lang: 'en' })
   if (near) {
-    params.set('lat', near.lat.toFixed(4))
-    params.set('lon', near.lng.toFixed(4))
+    // Search only needs a rough area to rank results (~1 km), not your exact position.
+    params.set('lat', near.lat.toFixed(2))
+    params.set('lon', near.lng.toFixed(2))
   }
   const res = await fetch(`${BASE}/api/?${params}`, { signal })
   if (!res.ok) throw new Error(`Search failed (${res.status})`)
   const data = (await res.json()) as { features: PhotonFeature[] }
-  return data.features.map(toPlace)
+  // One place is often mapped several times (node, building, site); keep the first per name nearby.
+  const kept: PhotonPlace[] = []
+  for (const p of data.features.map(toPlace)) {
+    const dupe = kept.some(
+      (k) => k.name.toLowerCase() === p.name.toLowerCase() && Math.abs(k.lat - p.lat) < 0.003 && Math.abs(k.lng - p.lng) < 0.004,
+    )
+    if (!dupe) kept.push(p)
+  }
+  return kept
 }
 
 /**
@@ -71,7 +80,7 @@ export async function searchNearbyCategory(
   near: LatLng,
   signal?: AbortSignal,
 ): Promise<PhotonPlace[]> {
-  const params = new URLSearchParams({ q, limit: '20', lang: 'en', lat: near.lat.toFixed(4), lon: near.lng.toFixed(4) })
+  const params = new URLSearchParams({ q, limit: '20', lang: 'en', lat: near.lat.toFixed(3), lon: near.lng.toFixed(3) }) // ~100 m is enough to rank nearby results
   for (const t of tags) params.append('osm_tag', t)
   const res = await fetch(`${BASE}/api/?${params}`, { signal })
   if (!res.ok) throw new Error(`Search failed (${res.status})`)
@@ -83,8 +92,9 @@ export async function searchNearbyCategory(
 /** Named things near a point, nearest first. */
 export async function reverseGeocode(at: LatLng, signal?: AbortSignal): Promise<PhotonPlace[]> {
   const params = new URLSearchParams({
-    lat: at.lat.toFixed(6),
-    lon: at.lng.toFixed(6),
+    // ~10 m precision: enough to find what's around you without sending your exact spot.
+    lat: at.lat.toFixed(4),
+    lon: at.lng.toFixed(4),
     limit: '6',
     radius: '0.15', // km
     lang: 'en',

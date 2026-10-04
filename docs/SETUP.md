@@ -72,38 +72,85 @@ so don't install from it, because data saved there won't carry over to the real 
 
 ---
 
-## 3. Optional: sync phone ↔ laptop (Supabase)
+## 3. Accounts and sync (Supabase)
 
-Without this, each device keeps its own data (use **Settings → Export/Import backup**
-to move it). With it, sign in with the same email on both and they stay in sync.
+Without this, Wander runs on-device only: the landing page's **Try it without an account**
+opens the map, and **Settings → Export/Import backup** moves data between devices. With it you
+get the sign-in screen (Google, or email + password with reset) and encrypted phone ↔ laptop sync.
 
 1. Sign up at https://supabase.com with GitHub (no card).
 2. **New project**: any name, set a database password (save it somewhere), region **Sydney**.
 3. **SQL Editor → New query**: paste all of [`supabase/schema.sql`](../supabase/schema.sql) and click **Run**.
-4. **Send a login code instead of a link** (links open Safari instead of the
-   home-screen app). Go to **Authentication → Emails → Magic Link** and set the body to:
-   ```html
-   <h2>Your Wander sign-in code</h2>
-   <p style="font-size:28px;letter-spacing:4px"><strong>{{ .Token }}</strong></p>
-   ```
-5. **Project Settings → API Keys**: copy the **Project URL** and the **publishable** key
+   It's safe to re-run. **If you set sync up before October 2026, run it again now**: it adds the
+   encryption key function, and sync shows an error until you do.
+4. **Project Settings → API Keys**: copy the **Project URL** and the **publishable** key
    (starts with `sb_publishable_`; the legacy `anon` key also works). Both are safe to put in
    front-end code, because row-level security stops anyone reading your rows.
-6. **Locally:** copy `.env.example` to `.env.local` and fill in:
+5. **Locally:** copy `.env.example` to `.env.local` and fill in:
    ```
    VITE_SUPABASE_URL=https://xxxx.supabase.co
    VITE_SUPABASE_KEY=sb_publishable_...
    ```
-   Restart `npm run dev`.
-7. **On Vercel:** your project → **Settings → Environment Variables**, then add the same
-   two variables and **redeploy** (they're baked in at build time).
-8. In Wander: **Settings → Sync across devices**, enter your email, type the code you receive.
-   Do this on each device.
+   Restart `npm run dev`. **On Vercel:** add the same two under **Settings → Environment
+   Variables** and **redeploy** (they're baked in at build time).
+6. **Redirect URLs** (needed for Google, confirmation and password-reset links):
+   **Authentication → URL Configuration**. Set **Site URL** to your Vercel URL
+   (e.g. `https://wander-xyz.vercel.app`) and add these under **Redirect URLs**:
+   ```
+   http://localhost:5173/**
+   https://wander-xyz.vercel.app/**
+   ```
+7. **Password rules:** **Authentication → Sign In / Providers → Email**. Set **Minimum password
+   length** to `10` and **Password requirements** to *Lowercase, uppercase, digits and symbols*.
+   This matches the app's checks, so they're also enforced by the server. (The app also checks
+   new passwords against Have I Been Pwned's breach list. Only the first five characters of the
+   password's hash leave the device.)
+8. **Email confirmation and reset emails:** on the same page, decide whether **Confirm email**
+   stays on. Supabase's built-in mailer only delivers to your own project's team members and
+   sends a few emails an hour. That's fine while it's just you, but before other people sign up,
+   add free SMTP under **Authentication → Emails → SMTP Settings**. [Brevo](https://www.brevo.com)
+   gives 300 emails a day with no card: verify your sender address, then paste the SMTP host,
+   port, login and key it gives you.
+
+### Google sign-in
+
+1. Go to https://console.cloud.google.com (no billing account needed), create a project, then
+   open **APIs & Services → OAuth consent screen**. Choose **External**, fill in the app name
+   and your email, and add yourself as a **Test user** (or publish the app).
+2. **Credentials → Create credentials → OAuth client ID → Web application.** Under
+   **Authorised redirect URIs**, add the callback URL shown in Supabase at
+   **Authentication → Sign In / Providers → Google** (it looks like
+   `https://xxxx.supabase.co/auth/v1/callback`).
+3. Copy the **Client ID** and **Client secret** into that Supabase Google provider page,
+   enable it and save.
+
+> **iPhone home-screen app:** Google sign-in leaves the app for Google's page. iOS normally
+> brings you back signed in, but some iOS versions finish the sign-in in a Safari sheet instead.
+> If that happens, use email + password in the installed app. They're the same account if you
+> used the same email.
+
+### How your data is protected
+
+- **In transit:** everything goes over HTTPS/TLS.
+- **Encrypted before upload:** each place, visit, walk and pick is encrypted on the device with
+  AES-256-GCM (`src/lib/crypto.ts`). The `records` table only stores ciphertext, plus the row id,
+  timestamps and deleted flag that sync needs. The database rejects new plaintext rows.
+- **Per-user keys:** each account's key is derived from a root secret in **Supabase Vault**,
+  and only that signed-in user can fetch it (`data_key()` in the schema). So a leaked table,
+  backup or log can't be read. Keys survive password resets and work the same for Google
+  accounts. This protects against leaks, not against Supabase itself: a fully zero-knowledge
+  design would need a separate passphrase you could never recover.
+- **Row-level security:** every query only sees the signed-in user's rows.
+- **Passwords:** hashed with bcrypt by Supabase Auth, never stored by Wander.
+- **On the device:** data in IndexedDB is protected by your phone's or laptop's own disk
+  encryption (iPhone passcode, BitLocker, FileVault).
+
+> **Never delete or rotate** the `wander_data_key_root` secret in Vault: synced data
+> encrypted with it would become unreadable. Each device still keeps its own copy, though.
 
 **Free-tier notes:** Supabase pauses projects after about a week with no activity.
 If sync shows an error after a break, open the Supabase dashboard and click **Restore**.
-Your data is safe on your devices in the meantime. The built-in email sender only allows a
-few emails an hour, which is plenty because you stay signed in.
+Your data is safe on your devices in the meantime.
 
 ---
 
@@ -116,7 +163,8 @@ your key never appears in the app's code.
 
 1. **Get a key:** sign up at https://openrouteservice.org/dev/#/signup (email, no card),
    then open **Dashboard → Tokens**, create a token (Standard plan) and copy it.
-2. **Log in to Cloudflare from the terminal** (uses the account from step 2):
+2. **Create a free Cloudflare account** at https://dash.cloudflare.com/sign-up (email only, no card),
+   then log in to it from the terminal:
    ```bash
    cd worker
    npm install
@@ -126,7 +174,7 @@ your key never appears in the app's code.
    ```bash
    npx wrangler secret put ORS_API_KEY
    ```
-4. **Allow your site:** in `worker/wrangler.jsonc`, add your Pages URL to `ALLOWED_ORIGINS`,
+4. **Allow your site:** in `worker/wrangler.jsonc`, add your Vercel URL to `ALLOWED_ORIGINS`,
    e.g. `"http://localhost:5173,https://wander-xyz.vercel.app,https://wander-*-yourname.vercel.app"`
    (the second pattern covers Vercel preview deployments).
 5. **Deploy:**

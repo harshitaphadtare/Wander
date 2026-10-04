@@ -1,3 +1,5 @@
+<p align="center"><img src="public/favicon.svg" width="88" alt="Wander logo"></p>
+
 # Wander
 
 A personal explore map that remembers where you go, turns repeat visits into
@@ -69,7 +71,7 @@ Phone / laptop browser
 | `npm run build` | Typecheck + production build to `dist/` |
 | `npm run preview` | Serve the production build locally |
 | `npm run lint` | oxlint |
-| `npm run icons` | Regenerate PWA icons from `public/favicon.svg` |
+| `npm run icons` | Regenerate the favicon and every app icon from the logo in `scripts/icons.mjs` |
 
 ## Roadmap
 

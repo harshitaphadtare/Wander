@@ -27,3 +27,6 @@ dist-ssr
 worker/node_modules
 worker/.wrangler
 worker/.dev.vars
+
+# Local env files (Supabase keys etc.)
+.env

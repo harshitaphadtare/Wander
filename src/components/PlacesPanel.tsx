@@ -47,6 +47,7 @@ export default function PlacesPanel({ places, from, onPick, onClose }: Props) {
       eyebrow={`${plural(places.length, 'place')} · ${plural(favCount, 'favourite')}`}
       title="Your places"
     >
+      {places.length > 0 && (
       <div className="toolbar">
         <Segmented<Filter>
           id="places-filter"
@@ -63,6 +64,7 @@ export default function PlacesPanel({ places, from, onPick, onClose }: Props) {
           {SORT_LABEL[sort]}
         </button>
       </div>
+      )}
 
       {list.length === 0 ? (
         places.length === 0 ? (

@@ -69,8 +69,9 @@ export async function hourlyForecast(at: LatLng, signal?: AbortSignal): Promise<
   if (cached?.key === key && Date.now() - cached.fetchedAt < TTL_MS) return cached.hours
 
   const params = new URLSearchParams({
-    latitude: at.lat.toFixed(3),
-    longitude: at.lng.toFixed(3),
+    // Weather doesn't change within a kilometre; don't send more precision than that.
+    latitude: at.lat.toFixed(2),
+    longitude: at.lng.toFixed(2),
     hourly: 'temperature_2m,precipitation_probability,weather_code,is_day',
     forecast_days: '2',
     timeformat: 'unixtime',

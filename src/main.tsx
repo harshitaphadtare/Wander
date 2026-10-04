@@ -5,7 +5,7 @@ import { MotionConfig } from 'motion/react'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { registerSW } from 'virtual:pwa-register'
-import App from './App.tsx'
+import Root from './Root.tsx'
 import './index.css'
 import { requestPersistentStorage } from './lib/db'
 import { startSync } from './lib/sync'
@@ -20,7 +20,7 @@ createRoot(document.getElementById('root')!).render(
     {/* Respect the OS "Reduce Motion" setting for every animation. */}
     <MotionConfig reducedMotion="user">
       <ConfirmProvider>
-        <App />
+        <Root />
       </ConfirmProvider>
     </MotionConfig>
   </StrictMode>,

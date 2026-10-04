@@ -3,9 +3,11 @@ import { motion } from 'motion/react'
 import { useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { exportBackup, importBackup, saveBackupFile } from '../lib/backup'
 import { plural, relativeTime } from '../lib/format'
-import { sendLoginCode, signOut, syncNow, syncStore, verifyLoginCode } from '../lib/sync'
+import { openAuth, signOut } from '../lib/auth'
+import { syncNow, syncStore } from '../lib/sync'
 import { useConfirm } from '../ui/Confirm'
 import Sheet from '../ui/Sheet'
+import { AppIcon } from '../ui/Logo'
 
 interface Props {
   placeCount: number
@@ -100,7 +102,7 @@ export default function SettingsPanel({ placeCount, visitCount, autoDetect, onAu
         </div>
       </Group>
 
-      <SyncGroup notify={notify} />
+      <SyncGroup />
 
       <Group title="Your data" footer="Backups merge on import, so newer changes are never overwritten.">
         <button className="group-row" onClick={doExport} disabled={busy}>
@@ -127,6 +129,7 @@ export default function SettingsPanel({ placeCount, visitCount, autoDetect, onAu
       </Group>
 
       <p className="colophon">
+        <AppIcon size={44} />
         <span className="display">Wander</span>
         Map © OpenFreeMap · OpenMapTiles · OpenStreetMap contributors. Search by Photon.
       </p>
@@ -134,13 +137,9 @@ export default function SettingsPanel({ placeCount, visitCount, autoDetect, onAu
   )
 }
 
-function SyncGroup({ notify }: { notify: Props['notify'] }) {
+function SyncGroup() {
   const confirm = useConfirm()
   const sync = useSyncExternalStore(syncStore.subscribe, syncStore.get)
-  const [email, setEmail] = useState('')
-  const [code, setCode] = useState('')
-  const [step, setStep] = useState<'email' | 'code'>('email')
-  const [busy, setBusy] = useState(false)
 
   const icon = (
     <span className="group-icon" style={{ background: '#F29D0C' }}>
@@ -160,51 +159,17 @@ function SyncGroup({ notify }: { notify: Props['notify'] }) {
     )
   }
 
-  const run = async (fn: () => Promise<void>) => {
-    setBusy(true)
-    try {
-      await fn()
-    } catch (err) {
-      notify((err as Error).message, 'error')
-    } finally {
-      setBusy(false)
-    }
-  }
-
   if (sync.status === 'signed-out') {
     return (
-      <Group title="Sync" footer="Sign in with the same email on your phone and laptop to keep them in sync.">
-        <form
-          className="group-form"
-          onSubmit={(e) => {
-            e.preventDefault()
-            void run(async () => {
-              if (step === 'email') {
-                await sendLoginCode(email.trim())
-                setStep('code')
-                notify('Code sent. Check your email.', 'success')
-              } else {
-                await verifyLoginCode(email.trim(), code.trim())
-                notify('Signed in. Syncing…', 'success')
-              }
-            })
-          }}
-        >
+      <Group title="Sync" footer="Sign in with Google or email to keep your phone and laptop in sync. Everything is encrypted on this device before upload.">
+        <button className="group-row" onClick={() => openAuth('signin')}>
           {icon}
-          {step === 'email' ? (
-            <input type="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
-          ) : (
-            <input inputMode="numeric" autoComplete="one-time-code" placeholder="Code from the email" value={code} onChange={(e) => setCode(e.target.value)} required />
-          )}
-          <button className="btn primary small" disabled={busy}>
-            {step === 'email' ? 'Send code' : 'Verify'}
-          </button>
-        </form>
-        {step === 'code' && (
-          <button className="group-row subtle" onClick={() => setStep('email')}>
-            <span className="group-label">Use a different email</span>
-          </button>
-        )}
+          <span className="group-label">Sign in to sync</span>
+          <ChevronRight size={16} className="row-chev" />
+        </button>
+        <button className="group-row subtle" onClick={() => openAuth('signup')}>
+          <span className="group-label">New here? Create an account</span>
+        </button>
       </Group>
     )
   }

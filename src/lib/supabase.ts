@@ -11,9 +11,30 @@ function validUrl(value: string) {
   }
 }
 
+/**
+ * A secret / service_role key bypasses row-level security, and anything in a
+ * VITE_ variable ships to every visitor. Refuse it loudly rather than use it.
+ */
+function isSecretKey(value: string) {
+  if (value.startsWith('sb_secret_')) return true
+  try {
+    // Legacy JWT keys: the payload says which role it grants.
+    return JSON.parse(atob(value.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).role === 'service_role'
+  } catch {
+    return false
+  }
+}
+const secret = !!key && isSecretKey(key)
+if (secret) {
+  console.error(
+    '[wander] VITE_SUPABASE_KEY is a SECRET key. It must be the publishable key (sb_publishable_…). ' +
+      'Replace it, redeploy, and rotate the secret key in Supabase: it has been exposed.',
+  )
+}
+
 // A typo in .env shouldn't take the whole app down; fall back to on-device mode.
-const configured = !!url && !!key && validUrl(url)
-if (url && !configured) {
+const configured = !!url && !!key && !secret && validUrl(url)
+if (url && !configured && !secret) {
   console.warn(
     `[wander] VITE_SUPABASE_URL isn't a URL (expected https://<project>.supabase.co${url.startsWith('sb_') ? '; it looks like the key was pasted there' : ''}). Accounts and sync are off.`,
   )

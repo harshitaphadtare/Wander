@@ -209,6 +209,15 @@ function Hero({ scroller, ctaRef, signedIn }: { scroller: RefObject<HTMLDivEleme
         </motion.div>
 
         <div className="lp-hero-visual">
+          {/* Soft circular stage the phone sits on: rings like a map's distance circles. */}
+          <motion.div
+            className="lp-stage"
+            aria-hidden
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 1.2, ease, delay: 0.1 }}
+          />
+          <div className="lp-device">
           <motion.div
             className="lp-phone"
             style={{ y: phoneY, rotateX: phoneTilt, transformPerspective: 1400 }}
@@ -242,6 +251,7 @@ function Hero({ scroller, ctaRef, signedIn }: { scroller: RefObject<HTMLDivEleme
               <small>somewhere new, every week</small>
             </div>
           </motion.div>
+          </div>
         </div>
       </div>
     </section>

@@ -1,6 +1,7 @@
 import { Coffee, Heart, MapPin, Star, Trees, Utensils } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useState } from 'react'
+import './heromap.css'
 
 const ease = [0.16, 1, 0.3, 1] as const
 

@@ -299,7 +299,26 @@
   position: relative;
   display: grid;
   place-items: center;
-  padding: 0 4px;
+  padding: 12px 0 8px;
+}
+/* A soft circular stage behind the phone, ringed like distance circles on a map. */
+.lp-stage {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(124vw, 560px);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background:
+    repeating-radial-gradient(circle at 50% 50%, transparent 0 54px, rgba(242, 84, 45, 0.09) 54px 55px),
+    radial-gradient(circle at 50% 50%, #fff 0%, rgba(253, 233, 226, 0.9) 36%, rgba(253, 233, 226, 0) 68%);
+  mask-image: radial-gradient(circle, #000 50%, transparent 70%);
+  -webkit-mask-image: radial-gradient(circle, #000 50%, transparent 70%);
+  pointer-events: none;
+}
+.lp-device {
+  position: relative;
 }
 .lp-phone {
   position: relative;
@@ -355,14 +374,14 @@
   font-size: 12px;
   color: var(--ink-3);
 }
-/* Phones: keep the cards inside the screen edges */
+/* Anchored to the phone's edges; on phones they stay inside the screen. */
 .lp-float.a {
-  top: 14%;
-  left: 0;
+  top: 20%;
+  left: -12%;
 }
 .lp-float.b {
-  top: 52%;
-  right: 0;
+  bottom: 30%;
+  right: -12%;
 }
 .lp-float-icon {
   width: 32px;
@@ -371,136 +390,6 @@
   place-items: center;
   border-radius: 10px;
   color: #fff;
-}
-
-/* ---------- Hero map (inside the phone) ---------- */
-.hm {
-  position: absolute;
-  inset: 0;
-  font-size: 12px;
-}
-.hm-svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-.hm-pulse {
-  transform-origin: 150px 505px;
-  animation: hm-pulse 2.4s var(--ease-out) infinite;
-}
-@keyframes hm-pulse {
-  from {
-    transform: scale(0.5);
-    opacity: 0.5;
-  }
-  to {
-    transform: scale(1.6);
-    opacity: 0;
-  }
-}
-.hm-pin {
-  position: absolute;
-  width: 26px;
-  height: 26px;
-  margin: -13px 0 0 -13px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  color: #fff;
-  border: 2.5px solid #fff;
-  box-shadow: 0 4px 10px rgba(20, 18, 15, 0.25);
-}
-.hm-search {
-  position: absolute;
-  top: 46px;
-  left: 12px;
-  right: 12px;
-  height: 38px;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 0 14px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  color: var(--ink-3);
-  font-size: 12.5px;
-  box-shadow: var(--shadow-sm);
-}
-.hm-search-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 2px solid var(--ink-3);
-}
-.hm-card {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 80px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.95);
-  box-shadow: var(--shadow-float);
-}
-.hm-card strong {
-  display: block;
-  font-size: 12.5px;
-}
-.hm-card small {
-  color: var(--ink-3);
-  font-size: 11px;
-}
-.hm-card-icon {
-  flex: none;
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  color: #fff;
-}
-.hm-dock {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 14px;
-  height: 54px;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  align-items: center;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: var(--shadow-sm);
-}
-.hm-dock span {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  font-size: 9.5px;
-  font-weight: 560;
-  color: var(--ink-3);
-}
-.hm-dock i {
-  width: 18px;
-  height: 18px;
-  border-radius: 6px;
-  background: currentColor;
-  opacity: 0.35;
-}
-.hm-dock .on {
-  color: var(--accent);
-}
-.hm-dock .on i {
-  opacity: 1;
 }
 
 /* ---------- Marquee ---------- */
@@ -1496,10 +1385,10 @@
     flex: 0 0 auto;
   }
   .lp-float.a {
-    left: 6%;
+    left: -26%;
   }
   .lp-float.b {
-    right: 6%;
+    right: -26%;
   }
   .lp-sticky {
     display: none;
@@ -1533,37 +1422,50 @@
   .lp-hero {
     padding: 0;
   }
-  /* The whole hero (copy + phone) fits in one screen: size by height as well as width. */
+  /*
+   * One screen, two balanced columns that share the nav's left edge:
+   * copy on a 12-col grid's first half (kept to a readable measure), the
+   * phone centred on its stage in the second half.
+   */
   .lp-hero-inner {
-    grid-template-columns: 1.1fr 0.9fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     align-items: center;
-    gap: 48px;
+    gap: clamp(32px, 5vw, 80px);
     height: calc(var(--app-h, 100dvh) - 68px);
-    min-height: 560px;
-    max-height: 900px;
-    padding: 2vh 0 4vh;
+    min-height: 600px;
+    max-height: 920px;
+    padding-block: 3vh 6vh;
+  }
+  .lp-hero-copy {
+    max-width: 600px;
   }
   .lp-hero h1 {
-    margin-top: 2.2vh;
-    font-size: min(6.4vw, 10.5vh, 92px);
+    margin-top: 2.4vh;
+    font-size: min(5.6vw, 10vh, 88px);
+    line-height: 0.95;
   }
   .lp-lede {
-    margin-top: 2.2vh;
-    font-size: min(19px, 2.3vh);
+    max-width: 30em;
+    margin-top: 2.6vh;
+    font-size: clamp(16px, 2.2vh, 19px);
   }
   .lp-hero-cta {
-    margin-top: 3.2vh;
+    margin-top: 3.4vh;
   }
   .lp-trust {
-    margin-top: 2.4vh;
+    margin-top: 2.6vh;
   }
   .lp-hero-visual {
     height: 100%;
+    padding: 0;
+  }
+  .lp-stage {
+    width: min(46vw, 92vh, 680px);
   }
   .lp-phone {
     width: auto;
-    height: min(680px, calc(var(--app-h, 100dvh) - 150px));
-    min-height: 480px;
+    height: min(640px, calc(var(--app-h, 100dvh) - 190px));
+    min-height: 460px;
     padding: 11px;
     border-radius: 54px;
   }
@@ -1572,15 +1474,16 @@
   }
   .lp-float {
     padding: 12px 16px 12px 12px;
+    white-space: nowrap;
   }
   .lp-float.a {
-    top: 16%;
-    left: -4%;
+    top: 18%;
+    left: -34%;
   }
   .lp-float.b {
     top: auto;
-    bottom: 16%;
-    right: -4%;
+    bottom: 30%;
+    right: -36%;
   }
   .lp-section {
     padding: 120px 0;

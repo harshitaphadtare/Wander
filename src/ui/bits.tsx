@@ -46,15 +46,21 @@ export function CountUp({ value }: { value: number }) {
   const ref = useRef<HTMLSpanElement>(null)
   const from = useRef(0)
   useEffect(() => {
+    const show = (v: number) => {
+      if (ref.current) ref.current.textContent = String(Math.round(v))
+    }
     const controls = animate(from.current, value, {
       duration: 0.7,
       ease: [0.16, 1, 0.3, 1],
-      onUpdate: (v) => {
-        if (ref.current) ref.current.textContent = String(Math.round(v))
-      },
+      onUpdate: show,
+      // Skipped/reduced-motion animations may never call onUpdate; always land on the real number.
+      onComplete: () => show(value),
     })
     from.current = value
-    return () => controls.stop()
+    return () => {
+      controls.stop()
+      show(value)
+    }
   }, [value])
   return <span ref={ref}>0</span>
 }

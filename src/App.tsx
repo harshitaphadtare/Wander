@@ -61,15 +61,15 @@ function sheetPadding(open: boolean): Padding {
   if (!open) return { top: 0, bottom: 0, left: 0, right: 0 }
   return matchMedia(DESKTOP_QUERY).matches
     ? { top: 0, bottom: 0, left: 420, right: 0 }
-    : // sheet is capped at 62dvh and sits ~92px above the bottom (dock); keep the pin + label above it
-      { top: 76, bottom: Math.round(window.innerHeight * 0.62 + 110), left: 0, right: 0 }
+    : // detail sheets are capped at 62dvh and sit at the bottom edge (the dock steps aside)
+      { top: 76, bottom: Math.round(window.innerHeight * 0.62 + 30), left: 0, right: 0 }
 }
 
 /** Fit a whole route on screen, clear of the sheet / side panel. */
 function routePadding(sheetOpen: boolean): Padding {
   if (matchMedia(DESKTOP_QUERY).matches) return { top: 90, bottom: 110, left: sheetOpen ? 450 : 60, right: 70 }
   return sheetOpen
-    ? { top: 90, bottom: Math.round(window.innerHeight * 0.62 + 120), left: 44, right: 44 }
+    ? { top: 90, bottom: Math.round(window.innerHeight * 0.62 + 40), left: 44, right: 44 }
     : { top: 110, bottom: 190, left: 44, right: 44 }
 }
 
@@ -524,7 +524,9 @@ export default function App() {
   }
 
   return (
-    <div className={`app ${sheet ? 'has-sheet' : ''} ${showNearby ? 'has-nearby' : ''} ${heatOn ? 'has-heat' : ''}`}>
+    <div
+      className={`app ${sheet ? 'has-sheet' : ''} ${sheet && !tab && sheet.type !== 'settings' ? 'has-detail' : ''} ${showNearby ? 'has-nearby' : ''} ${heatOn ? 'has-heat' : ''}`}
+    >
       <MapView
         ref={map}
         places={allPlaces}

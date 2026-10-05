@@ -42,13 +42,14 @@ export default function Root() {
 
   return (
     <>
-      <AnimatePresence mode="wait">
+      {/* Crossfade (not mode="wait") so the next screen never waits on an exit animation. */}
+      <AnimatePresence initial={false}>
         <motion.div
           key={screen}
           className="root-screen"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
+          exit={{ opacity: 0, pointerEvents: 'none' }}
           transition={{ duration: 0.3 }}
         >
           <Suspense fallback={null}>

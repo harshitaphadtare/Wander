@@ -66,7 +66,9 @@ export function SavedPlaceSheet({ place, from, busy, onCheckIn, onWalk, onClose,
   const remove = async () => {
     const ok = await confirm({
       title: `Remove ${place.name}?`,
-      message: `This deletes the place and its ${plural(place.visitCount, 'visit')} from your journal.`,
+      message: place.visitCount
+        ? `This deletes the place and its ${plural(place.visitCount, 'visit')} from your journal.`
+        : 'This removes it from your places.',
       confirmLabel: 'Remove',
       destructive: true,
     })

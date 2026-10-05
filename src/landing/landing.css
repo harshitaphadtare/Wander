@@ -1531,19 +1531,39 @@
     margin-left: 0;
   }
   .lp-hero {
-    padding: 40px 0 90px;
+    padding: 0;
   }
+  /* The whole hero (copy + phone) fits in one screen: size by height as well as width. */
   .lp-hero-inner {
     grid-template-columns: 1.1fr 0.9fr;
     align-items: center;
     gap: 48px;
-    min-height: min(740px, calc(100dvh - 120px));
+    height: calc(var(--app-h, 100dvh) - 68px);
+    min-height: 560px;
+    max-height: 900px;
+    padding: 2vh 0 4vh;
+  }
+  .lp-hero h1 {
+    margin-top: 2.2vh;
+    font-size: min(6.4vw, 10.5vh, 92px);
   }
   .lp-lede {
-    font-size: 19px;
+    margin-top: 2.2vh;
+    font-size: min(19px, 2.3vh);
+  }
+  .lp-hero-cta {
+    margin-top: 3.2vh;
+  }
+  .lp-trust {
+    margin-top: 2.4vh;
+  }
+  .lp-hero-visual {
+    height: 100%;
   }
   .lp-phone {
-    width: 330px;
+    width: auto;
+    height: min(680px, calc(var(--app-h, 100dvh) - 150px));
+    min-height: 480px;
     padding: 11px;
     border-radius: 54px;
   }

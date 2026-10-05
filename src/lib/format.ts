@@ -45,3 +45,16 @@ export function duration(ms: number) {
 export function plural(n: number, word: string, pluralWord = `${word}s`) {
   return `${n} ${n === 1 ? word : pluralWord}`
 }
+
+/** "Sun 5 Oct" (adds the year when it isn't this year). */
+export function shortDate(t: number) {
+  const d = new Date(t)
+  const opts: Intl.DateTimeFormatOptions = { weekday: 'short', day: 'numeric', month: 'short' }
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric'
+  return d.toLocaleDateString(undefined, opts)
+}
+
+/** 8200 → "8,200" */
+export function steps(n: number) {
+  return Math.round(n).toLocaleString()
+}

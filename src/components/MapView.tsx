@@ -4,6 +4,7 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 // MapLibre 6 loads its worker from a separate file; let Vite bundle it and hand over the URL.
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import { useEffect, useImperativeHandle, useRef, useState, type CSSProperties, type Ref } from 'react'
+import { Camera } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { lineString, point } from '@turf/helpers'
 import nearestPointOnLine from '@turf/nearest-point-on-line'
@@ -70,6 +71,8 @@ interface Props {
   heat?: GeoJSON.FeatureCollection | null
   /** Explored % mist: unexplored hexes. */
   fog?: GeoJSON.FeatureCollection | null
+  /** Places with photos get their latest photo as the pin. */
+  pinPhotos?: Map<string, { url: string; count: number }>
 }
 
 function savedView(): { center: [number, number]; zoom: number } | null {
@@ -110,6 +113,7 @@ export default function MapView({
   onStopClick,
   heat = null,
   fog = null,
+  pinPhotos,
 }: Props) {
   const container = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MLMap | null>(null)
@@ -468,16 +472,27 @@ export default function MapView({
         const host = pinHosts.get(p.id)
         if (!host) return null
         const Icon = categoryIcon(p.category)
+        const photo = pinPhotos?.get(p.id)
         return createPortal(
           <div
-            className={`pin lvl-${p.level.key} ${p.id === selectedPlaceId ? 'is-selected' : ''}`}
+            className={`pin lvl-${p.level.key} ${photo ? 'has-photo' : ''} ${p.id === selectedPlaceId ? 'is-selected' : ''}`}
             style={{ '--c': p.level.color } as CSSProperties}
             role="button"
-            aria-label={p.name}
+            aria-label={photo ? `${p.name}, ${photo.count} ${photo.count === 1 ? 'photo' : 'photos'}` : p.name}
           >
-            <span className="pin-body">
-              <Icon size={15} strokeWidth={2.4} />
-            </span>
+            {photo ? (
+              <span className="pin-body pin-photo">
+                <img src={photo.url} alt="" draggable={false} />
+                <span className="pin-photo-count">
+                  <Camera size={10} strokeWidth={2.8} />
+                  {photo.count}
+                </span>
+              </span>
+            ) : (
+              <span className="pin-body">
+                <Icon size={15} strokeWidth={2.4} />
+              </span>
+            )}
             <span className="pin-label">{p.name}</span>
           </div>,
           host,

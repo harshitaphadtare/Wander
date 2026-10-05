@@ -22,7 +22,7 @@ import WrappedSheet from './components/WrappedSheet'
 import './features.css'
 import { useActiveWalk } from './hooks/useActiveWalk'
 import { useAutoDetect } from './hooks/useAutoDetect'
-import { useLists, usePlaces, useVisits, useWalks, type PlaceWithStats } from './hooks/useData'
+import { useLists, usePinPhotos, usePlaces, useVisits, useWalks, type PlaceWithStats } from './hooks/useData'
 import { useGeolocation } from './hooks/useGeolocation'
 import { useWalkPlanner, type WalkTarget } from './hooks/useWalkPlanner'
 import { DESKTOP_QUERY } from './hooks/useMedia'
@@ -119,6 +119,7 @@ export default function App() {
   const visits = useVisits()
   const lists = useLists()
   const walks = useWalks()
+  const pinPhotos = usePinPhotos()
   const geo = useGeolocation()
   const confirm = useConfirm()
   const map = useRef<MapHandle>(null)
@@ -136,6 +137,7 @@ export default function App() {
   /** Explored % mode, measured around where the map was when it opened. */
   const [fogAt, setFogAt] = useState<LatLng | null>(null)
   const [exploreShow, setExploreShow] = useState<ExploreShow>({ picks: [], loop: null })
+  const [exploreCollapsed, setExploreCollapsed] = useState(false)
   const pendingLocate = useRef(false)
   const tilePois = useCallback(
     (coords: [number, number][], radiusM: number) => map.current?.poisAlong(coords, radiusM) ?? Promise.resolve([]),
@@ -449,13 +451,18 @@ export default function App() {
   // Frame explore picks / a stroll loop as they arrive.
   useEffect(() => {
     if (sheet?.type !== 'explore') return
-    if (exploreShow.loop) map.current?.fitRoute(exploreShow.loop.coords, routePadding(true))
-    else if (exploreShow.picks.length > 1) map.current?.fitRoute(exploreShow.picks.map((p) => [p.lng, p.lat]), routePadding(true))
-    else if (exploreShow.picks[0]) flyTo(exploreShow.picks[0], true, 15)
-  }, [exploreShow, sheet?.type, flyTo])
+    // Minimised, the sheet is just a header, so the route can use most of the screen.
+    const open = !exploreCollapsed
+    if (exploreShow.loop) map.current?.fitRoute(exploreShow.loop.coords, routePadding(open))
+    else if (exploreShow.picks.length > 1 && open) map.current?.fitRoute(exploreShow.picks.map((p) => [p.lng, p.lat]), routePadding(open))
+    else if (exploreShow.picks[0] && open) flyTo(exploreShow.picks[0], true, 15)
+  }, [exploreShow, exploreCollapsed, sheet?.type, flyTo])
   // Leaving Explore clears its pins and loop.
   useEffect(() => {
-    if (sheet?.type !== 'explore') setExploreShow((s) => (s.picks.length || s.loop ? { picks: [], loop: null } : s))
+    if (sheet?.type !== 'explore') {
+      setExploreShow((s) => (s.picks.length || s.loop ? { picks: [], loop: null } : s))
+      setExploreCollapsed(false)
+    }
   }, [sheet?.type])
 
   // Show the whole route (and refit when a stop reshapes it).
@@ -618,6 +625,7 @@ export default function App() {
             approximate={!here}
             places={allPlaces}
             onShow={setExploreShow}
+            onCollapse={setExploreCollapsed}
             onFocus={(at) => flyTo(at, true, 16)}
             onWalk={(t) => walkTo(t)}
             onSave={async (input) => {
@@ -685,6 +693,7 @@ export default function App() {
         route={mapRoute}
         heat={heat?.data ?? null}
         fog={fog?.data ?? null}
+        pinPhotos={pinPhotos}
         stops={stopMarkers}
         selectedStopId={sheet?.type === 'walk' ? (planner.stop?.osmId ?? null) : null}
         onStopClick={(id) => {

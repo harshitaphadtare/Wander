@@ -64,3 +64,84 @@ export function usePhotoUrls(visitId: string | undefined): { photo: Photo; url: 
   useEffect(() => () => urls.forEach((u) => URL.revokeObjectURL(u.url)), [urls])
   return urls
 }
+
+export interface PinPhoto {
+  url: string
+  count: number
+}
+
+/**
+ * The newest photo per place (thumbnail), for photo pins on the map. Only
+ * thumbnails are turned into URLs, so this stays light with hundreds of photos.
+ */
+export function usePinPhotos(): Map<string, PinPhoto> {
+  const data = useLiveQuery(async () => {
+    const [photos, visits] = await Promise.all([db.photos.toArray(), db.visits.where('deleted').equals(0).toArray()])
+    const placeOf = new Map(visits.map((v) => [v.id, v.placeId]))
+    const byPlace = new Map<string, { photo: Photo; count: number }>()
+    for (const p of photos) {
+      const placeId = placeOf.get(p.visitId)
+      if (!placeId) continue
+      const cur = byPlace.get(placeId)
+      if (!cur) byPlace.set(placeId, { photo: p, count: 1 })
+      else {
+        cur.count++
+        if (p.createdAt > cur.photo.createdAt) cur.photo = p
+      }
+    }
+    return byPlace
+  }, [])
+  const pins = useMemo(() => {
+    const out = new Map<string, PinPhoto>()
+    for (const [placeId, { photo, count }] of data ?? []) out.set(placeId, { url: URL.createObjectURL(photo.thumb ?? photo.blob), count })
+    return out
+  }, [data])
+  useEffect(() => () => pins.forEach((p) => URL.revokeObjectURL(p.url)), [pins])
+  return pins
+}
+
+export interface PlacePhoto {
+  photo: Photo
+  url: string
+  visitId: string
+  /** when you were there */
+  at: number
+}
+
+/** Every photo from every visit to a place, newest visit first, for the place's carousel. */
+export function usePlacePhotos(placeId: string | undefined): PlacePhoto[] {
+  const data = useLiveQuery(async () => {
+    if (!placeId) return []
+    const visits = await db.visits.where('placeId').equals(placeId).filter((v) => !v.deleted).toArray()
+    const at = new Map(visits.map((v) => [v.id, v.arrivedAt]))
+    const photos = await db.photos.where('visitId').anyOf([...at.keys()]).toArray()
+    return photos
+      .map((photo) => ({ photo, visitId: photo.visitId, at: at.get(photo.visitId)! }))
+      .sort((a, b) => b.at - a.at || a.photo.createdAt - b.photo.createdAt)
+  }, [placeId])
+  const items = useMemo(() => (data ?? []).map((d) => ({ ...d, url: URL.createObjectURL(d.photo.blob) })), [data])
+  useEffect(() => () => items.forEach((i) => URL.revokeObjectURL(i.url)), [items])
+  return items
+}
+
+/** Thumbnail URLs per visit, for the photo strips in the Journal. */
+export function useVisitThumbs(visitIds: string[]): Map<string, { id: string; url: string }[]> {
+  const key = visitIds.join(',')
+  const data = useLiveQuery(
+    () => (visitIds.length ? db.photos.where('visitId').anyOf(visitIds).sortBy('createdAt') : Promise.resolve([] as Photo[])),
+    // visitIds is captured through `key`
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [key],
+  )
+  const thumbs = useMemo(() => {
+    const out = new Map<string, { id: string; url: string }[]>()
+    for (const p of data ?? []) {
+      const list = out.get(p.visitId) ?? []
+      list.push({ id: p.id, url: URL.createObjectURL(p.thumb ?? p.blob) })
+      out.set(p.visitId, list)
+    }
+    return out
+  }, [data])
+  useEffect(() => () => thumbs.forEach((l) => l.forEach((t) => URL.revokeObjectURL(t.url))), [thumbs])
+  return thumbs
+}

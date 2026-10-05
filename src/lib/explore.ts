@@ -3,6 +3,7 @@ import { aiRank } from './ai'
 import { timeOfDay } from './format'
 import { distanceM, formatDistance, type LatLng } from './geo'
 import { overpass, type OverpassElement } from './overpass'
+import { nearbyByTags } from './photon'
 import { loopRoute, type Route } from './routing'
 import { loadOpeningHours, type OpeningHours } from './stops'
 import { nextSunset } from './sun'
@@ -98,6 +99,15 @@ const MOOD_TAGS: Record<Exclude<Mood, 'stroll' | 'surprise'>, string[]> = {
   sunset: ['["tourism"="viewpoint"]', '["natural"~"^(beach|peak)$"]', '["man_made"="pier"]'],
 }
 
+/** The same moods as Photon tags, for the fast fallback (no hours or cuisine, but quick). */
+const PHOTON_TAGS: Record<Exclude<Mood, 'stroll' | 'surprise'>, string[]> = {
+  new: ['tourism:viewpoint', 'tourism:museum', 'tourism:gallery', 'tourism:attraction', 'leisure:park', 'leisure:garden', 'amenity:marketplace', 'amenity:arts_centre'],
+  hike: ['leisure:nature_reserve', 'boundary:national_park', 'natural:peak', 'tourism:viewpoint'],
+  food: ['amenity:restaurant', 'amenity:fast_food', 'amenity:cafe', 'amenity:ice_cream', 'shop:bakery'],
+  coffee: ['amenity:cafe'],
+  sunset: ['tourism:viewpoint', 'natural:beach', 'man_made:pier'],
+}
+
 const INDOOR = new Set(['museum', 'gallery', 'arts_centre', 'library', 'marketplace', 'cafe', 'restaurant', 'fast_food', 'bakery', 'ice_cream'])
 const OUTDOOR = new Set(['park', 'garden', 'viewpoint', 'beach', 'peak', 'nature_reserve', 'national_park', 'pier', 'lighthouse'])
 
@@ -130,29 +140,76 @@ function toCandidate(el: OverpassElement): Candidate | null {
 const cache = new Map<string, { at: number; list: Candidate[] }>()
 const CACHE_MS = 10 * 60_000
 
-async function candidates(tags: string[], at: LatLng, radiusM: number, signal?: AbortSignal): Promise<Candidate[]> {
+async function candidates(
+  tags: string[],
+  photonTags: string[],
+  at: LatLng,
+  radiusM: number,
+  signal?: AbortSignal,
+): Promise<Candidate[]> {
   // ~100 m grid for the cache key; OSM doesn't need your exact position.
   const key = `${tags.join('|')}@${at.lat.toFixed(3)},${at.lng.toFixed(3)}/${radiusM}`
   const hit = cache.get(key)
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.list
-  const around = `around:${radiusM},${at.lat.toFixed(4)},${at.lng.toFixed(4)}`
-  const query = `[out:json][timeout:25];(${tags.map((t) => `nwr(${around})${t}["name"];`).join('')});out center tags 250;`
-  const seen = new Set<string>()
-  // The free servers are often busy: one patient retry before giving up.
-  const elements = await overpass(query, signal).catch((err) => {
-    if (signal?.aborted) throw err
-    return overpass(query, signal, 30_000)
-  })
-  const list = elements
-    .map(toCandidate)
-    .filter((c): c is Candidate => {
-      if (!c) return false
-      // The same park is often mapped as a node and an area; keep one.
-      const k = `${c.name.toLowerCase()}|${c.lat.toFixed(3)}|${c.lng.toFixed(3)}`
-      if (seen.has(k)) return false
-      seen.add(k)
-      return true
+
+  const fromOverpass = async () => {
+    const around = `around:${radiusM},${at.lat.toFixed(4)},${at.lng.toFixed(4)}`
+    const query = `[out:json][timeout:25];(${tags.map((t) => `nwr(${around})${t}["name"];`).join('')});out center tags 250;`
+    const elements = await overpass(query, signal).catch((err) => {
+      if (signal?.aborted) throw err
+      return overpass(query, signal, 30_000) // the free servers are often busy: one patient retry
     })
+    return elements.map(toCandidate).filter((c): c is Candidate => !!c)
+  }
+  const fromPhoton = async () => {
+    const found = await nearbyByTags(at, radiusM / 1000, photonTags, signal)
+    const list = found.map(
+      (p): Candidate => ({
+        id: p.osmId ?? `${p.name}|${p.lat.toFixed(4)}|${p.lng.toFixed(4)}`,
+        osmId: p.osmId ?? '',
+        name: p.name,
+        lat: p.lat,
+        lng: p.lng,
+        category: p.category ?? 'attraction',
+        address: p.address,
+      }),
+    )
+    if (!list.length) throw new Error('Nothing found nearby')
+    return list
+  }
+
+  // Overpass has opening hours and cuisine, so it goes first. If it hasn't
+  // answered in 3.5 s (or fails), Photon races it: whichever lands first wins,
+  // so Explore never sits on a spinner just because a free server is busy.
+  const overpassTry = fromOverpass()
+  const photonTry = new Promise<Candidate[]>((resolve, reject) => {
+    const timer = setTimeout(() => fromPhoton().then(resolve, reject), 3_500)
+    overpassTry.then(
+      () => clearTimeout(timer), // Overpass won: no need to ask Photon
+      () => {
+        clearTimeout(timer)
+        fromPhoton().then(resolve, reject)
+      },
+    )
+    signal?.addEventListener('abort', () => clearTimeout(timer))
+  })
+  let found: Candidate[]
+  try {
+    photonTry.catch(() => {}) // a late loser's failure is fine
+    found = await Promise.any([overpassTry, photonTry])
+  } catch (err) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+    throw err instanceof AggregateError ? new Error('All Overpass servers are busy') : err
+  }
+
+  const seen = new Set<string>()
+  const list = found.filter((c) => {
+    // The same park is often mapped as a node and an area; keep one.
+    const k = `${c.name.toLowerCase()}|${c.lat.toFixed(3)}|${c.lng.toFixed(3)}`
+    if (seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
   cache.set(key, { at: Date.now(), list })
   return list
 }
@@ -277,7 +334,7 @@ export async function explore(o: Options): Promise<ExploreResult> {
   const moods: (keyof typeof MOOD_TAGS)[] = mood === 'surprise' ? ['new', 'food'] : [mood]
   const radius = mood === 'hike' ? Math.min(40_000, Math.max(8_000, o.reach * 2.5)) : o.reach
   const tags = moods.flatMap((m) => MOOD_TAGS[m])
-  const found = await candidates(tags, o.at, radius, o.signal)
+  const found = await candidates(tags, moods.flatMap((m) => PHOTON_TAGS[m]), o.at, radius, o.signal)
 
   // Match OSM results to your saved places (same feature, or same name within 40 m).
   const byOsm = new Map(o.places.filter((p) => p.osmId).map((p) => [p.osmId!, p]))
@@ -292,6 +349,7 @@ export async function explore(o: Options): Promise<ExploreResult> {
     const saved = savedNear(c)
     const visits = saved?.visitCount ?? 0
     const d = distanceM(o.at, c)
+    if (d > radius * 1.15) continue
     const far = d > WALKABLE_M
     const mins = walkMinutes(d)
 

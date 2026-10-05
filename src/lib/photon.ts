@@ -152,3 +152,19 @@ export async function nearbyAreas(at: LatLng, radiusKm: number, kinds: string[],
       : [],
   )
 }
+
+/** Places with any of `tags` (e.g. "amenity:cafe") within `radiusKm`, nearest first. Fast backup when Overpass is busy. */
+export async function nearbyByTags(at: LatLng, radiusKm: number, tags: string[], signal?: AbortSignal): Promise<PhotonPlace[]> {
+  const params = new URLSearchParams({
+    lat: at.lat.toFixed(4),
+    lon: at.lng.toFixed(4),
+    radius: String(Math.max(0.3, Math.round(radiusKm * 10) / 10)),
+    limit: '50',
+    lang: 'en',
+  })
+  for (const t of tags) params.append('osm_tag', t)
+  const res = await fetch(`${BASE}/reverse?${params}`, { signal })
+  if (!res.ok) throw new Error(`Search failed (${res.status})`)
+  const data = (await res.json()) as { features: PhotonFeature[] }
+  return data.features.filter((f) => f.properties.name).map(toPlace)
+}

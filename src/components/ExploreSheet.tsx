@@ -64,6 +64,8 @@ interface Props {
   approximate: boolean
   places: PlaceWithStats[]
   onShow(show: ExploreShow): void
+  /** Minimised: the parent re-frames the map with less room taken by the sheet. */
+  onCollapse?(collapsed: boolean): void
   onFocus(at: LatLng): void
   onWalk(pick: { name: string; lat: number; lng: number; osmId?: string; category?: string; placeId?: string }): void
   onSave(pick: { name: string; lat: number; lng: number; osmId?: string; category?: string; address?: string }): Promise<void>
@@ -72,7 +74,12 @@ interface Props {
 
 type Stage = { kind: 'moods' } | { kind: 'results'; mood: Mood }
 
-export default function ExploreSheet({ at, approximate, places, onShow, onFocus, onWalk, onSave, onClose }: Props) {
+export default function ExploreSheet({ at, approximate, places, onShow, onCollapse, onFocus, onWalk, onSave, onClose }: Props) {
+  const [collapsed, setCollapsedState] = useState(false)
+  const setCollapsed = (c: boolean) => {
+    setCollapsedState(c)
+    onCollapse?.(c)
+  }
   const [stage, setStage] = useState<Stage>({ kind: 'moods' })
   const [time, setTime] = useState<TimeBudget>(60)
   const [reach, setReach] = useState<Reach>(1500)
@@ -138,11 +145,13 @@ export default function ExploreSheet({ at, approximate, places, onShow, onFocus,
   useEffect(() => () => ctrl.current?.abort(), [])
 
   const pickMood = (m: Mood) => {
+    setCollapsed(false)
     setResult(null)
     setSeed(0)
     setStage({ kind: 'results', mood: m })
   }
   const back = () => {
+    setCollapsed(false)
     ctrl.current?.abort()
     setStage({ kind: 'moods' })
     setResult(null)
@@ -193,10 +202,21 @@ export default function ExploreSheet({ at, approximate, places, onShow, onFocus,
   }
 
   const M = mood ? MOOD_BY_KEY[mood] : null
+  // One line that says what's on the map while the sheet is minimised.
+  const summary = !collapsed
+    ? undefined
+    : result?.loop
+      ? `${(result.loop.distanceM / 1000).toFixed(1)} km loop · ${duration(result.loop.durationS * 1000)}`
+      : picks.length
+        ? `${picks.length} ${picks.length === 1 ? 'pick' : 'picks'} on the map · tap to see them`
+        : 'Tap to open'
 
   return (
     <Sheet
       onClose={onClose}
+      collapsed={collapsed}
+      onToggleCollapse={mood ? () => setCollapsed(!collapsed) : undefined}
+      subtitle={summary}
       eyebrow={M ? 'Explore' : approximate ? 'Around the map centre' : 'Explore'}
       title={M ? M.label : 'What do you feel like?'}
       leading={
@@ -297,7 +317,10 @@ export default function ExploreSheet({ at, approximate, places, onShow, onFocus,
                     pick={p}
                     index={i}
                     saved={saved.has(p.id) || !!p.savedPlaceId}
-                    onFocus={() => onFocus(p)}
+                    onFocus={() => {
+                      setCollapsed(true)
+                      onFocus(p)
+                    }}
                     onWalk={() => onWalk({ ...p, placeId: p.savedPlaceId })}
                     onSave={() => save(p)}
                   />

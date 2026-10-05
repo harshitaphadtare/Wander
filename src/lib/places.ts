@@ -118,6 +118,12 @@ export async function finishWalk(id: string, arrived: boolean) {
   notifyLocalChange()
 }
 
+export async function setVisitSteps(id: string, steps: number | null) {
+  const clean = steps && steps > 0 ? Math.min(200_000, Math.round(steps)) : undefined
+  await db.visits.update(id, { steps: clean, ...stamp() })
+  notifyLocalChange()
+}
+
 export async function setVisitNote(id: string, note: string) {
   await db.visits.update(id, { note: note.trim() || undefined, ...stamp() })
   notifyLocalChange()

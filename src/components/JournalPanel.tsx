@@ -1,15 +1,16 @@
-import { Camera, ChevronRight, Flame, Footprints, Gift, X } from 'lucide-react'
-import { motion } from 'motion/react'
-import { useMemo } from 'react'
-import type { PlaceWithStats } from '../hooks/useData'
+import { ChevronRight, Flame, Footprints, Gift, X } from 'lucide-react'
+import { AnimatePresence, motion } from 'motion/react'
+import { useMemo, useState } from 'react'
+import { usePhotoUrls, useVisitThumbs, type PlaceWithStats } from '../hooks/useData'
 import type { Visit } from '../lib/db'
-import { dayLabel, duration, startOfDay, timeOfDay } from '../lib/format'
+import { dayLabel, duration, shortDate, startOfDay, steps as fmtSteps, timeOfDay } from '../lib/format'
 import { PERIOD_OPTIONS, periodStart, type Period } from '../lib/periods'
 import { weeklyStreak } from '../lib/streak'
 import { deleteVisit } from '../lib/places'
 import { CountUp, EmptyState, IconTile, Segmented, Stagger } from '../ui/bits'
 import { useConfirm } from '../ui/Confirm'
 import { categoryIcon } from '../ui/icons'
+import { PhotoStrip, PhotoViewer } from '../ui/Photos'
 import Sheet from '../ui/Sheet'
 
 interface Props {
@@ -49,6 +50,9 @@ export default function JournalPanel({ visits, places, period, onPeriod, onHeatm
   }, [visits, period, byId])
 
   const uniquePlaces = new Set(inPeriod.map((v) => v.placeId)).size
+  const periodSteps = inPeriod.reduce((sum, v) => sum + (v.steps ?? 0), 0)
+  const thumbs = useVisitThumbs(useMemo(() => inPeriod.filter((v) => v.photoIds?.length).map((v) => v.id), [inPeriod]))
+  const [viewing, setViewing] = useState<{ visitId: string; index: number } | null>(null)
   const streak = useMemo(() => weeklyStreak(visits), [visits])
   let i = 0
 
@@ -86,6 +90,15 @@ export default function JournalPanel({ visits, places, period, onPeriod, onHeatm
           <small>New spots</small>
         </div>
       </div>
+
+      {periodSteps > 0 && (
+        <div className="steps-total">
+          <Footprints size={16} strokeWidth={2.3} />
+          <span>
+            <strong>{fmtSteps(periodSteps)}</strong> steps {period === 'all' ? 'logged' : `this ${period}`}
+          </span>
+        </div>
+      )}
 
       {visits.length > 0 && (
         <motion.div className="streak-card" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
@@ -161,23 +174,27 @@ export default function JournalPanel({ visits, places, period, onPeriod, onHeatm
                     <Stagger key={v.id} index={i++} className="timeline-item">
                       <span className="timeline-time">{timeOfDay(v.arrivedAt)}</span>
                       <span className="timeline-node" style={{ background: place.level.color }} />
-                      <button className="timeline-card" onClick={() => onVisit(v.id)}>
+                      <div
+                        className="timeline-card"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => onVisit(v.id)}
+                        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onVisit(v.id))}
+                      >
                         <IconTile icon={categoryIcon(place.category)} color={place.level.color} size={34} />
                         <span className="row-text">
                           <strong>{place.name}</strong>
                           <small>
                             {v.source === 'auto' ? 'Auto-detected' : 'Checked in'}
                             {v.leftAt ? ` · ${duration(v.leftAt - v.arrivedAt)}` : ''}
+                            {v.steps ? ` · ${fmtSteps(v.steps)} steps` : ''}
                           </small>
                           {v.note && <span className="timeline-note">“{v.note}”</span>}
+                          {thumbs.get(v.id) && (
+                            <PhotoStrip items={thumbs.get(v.id)!} onOpen={(index) => setViewing({ visitId: v.id, index })} />
+                          )}
                         </span>
-                        {!!v.photoIds?.length && (
-                          <span className="timeline-photos" aria-label={`${v.photoIds.length} photos`}>
-                            <Camera size={13} strokeWidth={2.4} />
-                            {v.photoIds.length}
-                          </span>
-                        )}
-                      </button>
+                      </div>
                       <button className="timeline-delete" aria-label="Delete visit" onClick={() => remove(v, place.name)}>
                         <X size={14} strokeWidth={2.4} />
                       </button>
@@ -189,6 +206,25 @@ export default function JournalPanel({ visits, places, period, onPeriod, onHeatm
           ))}
         </div>
       )}
+
+      <AnimatePresence>
+        {viewing && (
+          <VisitPhotos
+            key="viewer"
+            visit={visits.find((v) => v.id === viewing.visitId)!}
+            start={viewing.index}
+            onClose={() => setViewing(null)}
+          />
+        )}
+      </AnimatePresence>
     </Sheet>
   )
+}
+
+/** Full-size photos for one visit, loaded only when you open them. */
+function VisitPhotos({ visit, start, onClose }: { visit: Visit; start: number; onClose(): void }) {
+  const photos = usePhotoUrls(visit.id)
+  if (!photos.length) return null
+  const items = photos.map(({ photo, url }) => ({ id: photo.id, url, label: shortDate(visit.arrivedAt) }))
+  return <PhotoViewer items={items} start={start} onClose={onClose} />
 }

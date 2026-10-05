@@ -1,10 +1,11 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Bookmark, Check, Footprints, MapPinPlus, Pencil, Tag, Trash } from 'lucide-react'
+import { AnimatePresence } from 'motion/react'
 import { motion } from 'motion/react'
 import { useState } from 'react'
-import type { PlaceWithStats } from '../hooks/useData'
+import { usePlacePhotos, type PlaceWithStats } from '../hooks/useData'
 import { db, type List } from '../lib/db'
-import { plural, relativeTime, timeOfDay } from '../lib/format'
+import { plural, relativeTime, shortDate, steps as fmtSteps, timeOfDay } from '../lib/format'
 import { distanceM, formatDistance, type LatLng } from '../lib/geo'
 import { nextLevel } from '../lib/levels'
 import { isFoodPlace, prettyCategory, type PhotonPlace } from '../lib/photon'
@@ -12,6 +13,7 @@ import { deletePlace, renamePlace } from '../lib/places'
 import { CountUp, IconTile, ProgressRing } from '../ui/bits'
 import { useConfirm } from '../ui/Confirm'
 import { categoryIcon, LEVEL_ICONS } from '../ui/icons'
+import { PhotoCarousel, PhotoViewer } from '../ui/Photos'
 import Sheet from '../ui/Sheet'
 import ListChips from './ListChips'
 
@@ -56,6 +58,19 @@ export function SavedPlaceSheet({ place, from, lists, busy, onVisit, onCheckIn, 
         .reverse()
         .sortBy('arrivedAt')
         .then((v) => v.slice(0, 6)),
+    [place.id],
+  )
+  const photos = usePlacePhotos(place.id)
+  const memories = photos.map((p) => ({ id: p.photo.id, url: p.url, label: shortDate(p.at) }))
+  const [viewing, setViewing] = useState<number | null>(null)
+  const totalSteps = useLiveQuery(
+    () =>
+      db.visits
+        .where('placeId')
+        .equals(place.id)
+        .filter((v) => !v.deleted)
+        .toArray()
+        .then((vs) => vs.reduce((sum, v) => sum + (v.steps ?? 0), 0)),
     [place.id],
   )
   const next = nextLevel(place.visitCount)
@@ -121,6 +136,15 @@ export function SavedPlaceSheet({ place, from, lists, busy, onVisit, onCheckIn, 
         </div>
       }
     >
+      {memories.length > 0 && (
+        <section className="place-memories">
+          <div className="list-label">
+            Memories · {plural(memories.length, 'photo')}
+          </div>
+          <PhotoCarousel items={memories} onOpen={setViewing} />
+        </section>
+      )}
+
       <div className="stat-cards">
         <div className="stat-card">
           <span className="level-badge" style={{ '--c': place.level.color } as React.CSSProperties}>
@@ -159,6 +183,15 @@ export function SavedPlaceSheet({ place, from, lists, busy, onVisit, onCheckIn, 
         </div>
       )}
 
+      {!!totalSteps && (
+        <div className="steps-total">
+          <Footprints size={16} strokeWidth={2.3} />
+          <span>
+            <strong>{fmtSteps(totalSteps)}</strong> steps walked here
+          </span>
+        </div>
+      )}
+
       <EatClubNote category={place.category} />
 
       <ListChips placeId={place.id} listIds={place.listIds ?? []} lists={lists} />
@@ -178,7 +211,9 @@ export function SavedPlaceSheet({ place, from, lists, busy, onVisit, onCheckIn, 
                   <span className="mini-dot" />
                   <span className="mini-when">{relativeTime(v.arrivedAt)}</span>
                   <span className="mini-meta">
-                    {v.note ? `“${v.note}”` : `${timeOfDay(v.arrivedAt)} · ${v.source === 'auto' ? 'Auto' : 'Check-in'}`}
+                    {v.note
+                      ? `“${v.note}”`
+                      : [timeOfDay(v.arrivedAt), v.steps ? `${fmtSteps(v.steps)} steps` : v.source === 'auto' ? 'Auto' : 'Check-in'].join(' · ')}
                   </span>
                 </button>
               </motion.li>
@@ -186,6 +221,9 @@ export function SavedPlaceSheet({ place, from, lists, busy, onVisit, onCheckIn, 
           </ul>
         </section>
       )}
+      <AnimatePresence>
+        {viewing !== null && <PhotoViewer key="viewer" items={memories} start={viewing} onClose={() => setViewing(null)} />}
+      </AnimatePresence>
     </Sheet>
   )
 }

@@ -1,16 +1,16 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ArrowUpRight, Camera, ImagePlus, Trash, X } from 'lucide-react'
+import { ArrowUpRight, Camera, Footprints, ImagePlus, Minus, Plus, Trash } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { usePhotoUrls, type PlaceWithStats } from '../hooks/useData'
 import { db } from '../lib/db'
-import { dayLabel, duration, timeOfDay } from '../lib/format'
+import { dayLabel, duration, shortDate, steps as fmtSteps, timeOfDay } from '../lib/format'
 import { addPhotos, removePhoto } from '../lib/photos'
-import { deleteVisit, setVisitNote } from '../lib/places'
+import { deleteVisit, setVisitNote, setVisitSteps } from '../lib/places'
 import { IconTile } from '../ui/bits'
 import { useConfirm } from '../ui/Confirm'
 import { categoryIcon } from '../ui/icons'
+import { PhotoCarousel, PhotoViewer, type PhotoItem } from '../ui/Photos'
 import Sheet from '../ui/Sheet'
 
 interface Props {
@@ -21,21 +21,34 @@ interface Props {
   onClose(): void
 }
 
-const MAX_NOTE = 280
+const MAX_NOTE = 1000
 
-/** One check-in as a memory: a line about it and a few photos (photos stay on this device). */
+/** A textarea that grows with what you write instead of cutting it off. */
+function useAutosize(ref: React.RefObject<HTMLTextAreaElement | null>, value: string) {
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px` // include the border
+  }, [ref, value])
+}
+
+/** One check-in as a memory: a note, your steps, and photos (photos stay on this device). */
 export default function VisitSheet({ visitId, place, onOpenPlace, notify, onClose }: Props) {
   const confirm = useConfirm()
   const visit = useLiveQuery(() => db.visits.get(visitId), [visitId])
   const photos = usePhotoUrls(visitId)
   const [note, setNote] = useState<string | null>(null)
+  const [stepsDraft, setStepsDraft] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [viewing, setViewing] = useState<string | null>(null)
+  const [viewing, setViewing] = useState<number | null>(null)
   const input = useRef<HTMLInputElement>(null)
+  const area = useRef<HTMLTextAreaElement>(null)
 
   // Start from the saved note once it loads; after that the field is yours.
   const value = note ?? visit?.note ?? ''
   const dirty = note !== null && note.trim() !== (visit?.note ?? '')
+  useAutosize(area, value)
 
   // Save as you go (debounced), so closing the sheet never loses a note.
   useEffect(() => {
@@ -46,7 +59,9 @@ export default function VisitSheet({ visitId, place, onOpenPlace, notify, onClos
 
   // …and flush immediately when the sheet closes mid-typing.
   const latest = useRef({ note, dirty })
-  latest.current = { note, dirty }
+  useEffect(() => {
+    latest.current = { note, dirty }
+  })
   useEffect(
     () => () => {
       if (latest.current.dirty) void setVisitNote(visitId, latest.current.note!)
@@ -55,6 +70,17 @@ export default function VisitSheet({ visitId, place, onOpenPlace, notify, onClos
   )
 
   if (!visit) return null
+
+  const stepsValue = stepsDraft ?? (visit.steps ? String(visit.steps) : '')
+  const commitSteps = (raw: string) => {
+    const n = Number(raw.replace(/[^\d]/g, ''))
+    setStepsDraft(null)
+    if ((n || 0) !== (visit.steps ?? 0)) void setVisitSteps(visitId, n || null)
+  }
+  const bumpSteps = (by: number) => {
+    const n = Math.max(0, (visit.steps ?? 0) + by)
+    void setVisitSteps(visitId, n || null)
+  }
 
   const onFiles = async (files: FileList | null) => {
     if (!files?.length) return
@@ -82,7 +108,7 @@ export default function VisitSheet({ visitId, place, onOpenPlace, notify, onClos
     onClose()
   }
 
-  const viewed = photos.find((p) => p.photo.id === viewing)
+  const items: PhotoItem[] = photos.map(({ photo, url }) => ({ id: photo.id, url, label: shortDate(visit.arrivedAt) }))
 
   return (
     <Sheet
@@ -101,17 +127,38 @@ export default function VisitSheet({ visitId, place, onOpenPlace, notify, onClos
         </div>
       }
     >
+      {/* Photos first: they're the memory. */}
+      <section className="visit-photos">
+        {items.length ? (
+          <>
+            <PhotoCarousel items={items} onOpen={setViewing} />
+            <button className="photo-add-row" onClick={() => input.current?.click()} disabled={busy}>
+              {busy ? <span className="spinner" /> : <ImagePlus size={17} strokeWidth={2.2} />}
+              Add more photos
+            </button>
+          </>
+        ) : (
+          <motion.button className="photo-add-hero" onClick={() => input.current?.click()} disabled={busy} whileTap={{ scale: 0.98 }}>
+            {busy ? <span className="spinner" /> : <Camera size={24} strokeWidth={2} />}
+            <strong>Add photos</strong>
+            <small>They show up on the map pin and in your journal.</small>
+          </motion.button>
+        )}
+        <input ref={input} type="file" accept="image/*" multiple hidden onChange={(e) => onFiles(e.target.files)} />
+      </section>
+
       <label className="memo">
         <span className="list-label">Note</span>
         <textarea
+          ref={area}
           value={value}
           maxLength={MAX_NOTE}
-          rows={3}
+          rows={2}
           placeholder="Got the pistachio croissant…"
           onChange={(e) => setNote(e.target.value)}
         />
         <AnimatePresence>
-          {value.length > MAX_NOTE - 60 && (
+          {value.length > MAX_NOTE - 80 && (
             <motion.small className="memo-count" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               {MAX_NOTE - value.length} left
             </motion.small>
@@ -119,56 +166,59 @@ export default function VisitSheet({ visitId, place, onOpenPlace, notify, onClos
         </AnimatePresence>
       </label>
 
-      <section>
-        <div className="list-label">Photos</div>
-        <div className="photo-grid">
-          {photos.map(({ photo, url }, i) => (
-            <motion.button
-              key={photo.id}
-              className="photo-thumb"
-              onClick={() => setViewing(photo.id)}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: i * 0.04 }}
-              layoutId={`photo-${photo.id}`}
-            >
-              <img src={url} alt="" />
-            </motion.button>
-          ))}
-          <motion.button className="photo-add" onClick={() => input.current?.click()} disabled={busy} whileTap={{ scale: 0.95 }}>
-            {busy ? <span className="spinner" /> : photos.length ? <ImagePlus size={22} strokeWidth={2} /> : <Camera size={22} strokeWidth={2} />}
-            <small>{photos.length ? 'Add' : 'Add photo'}</small>
-          </motion.button>
-          <input ref={input} type="file" accept="image/*" multiple hidden onChange={(e) => onFiles(e.target.files)} />
+      <section className="steps-field">
+        <span className="list-label">Steps</span>
+        <div className="steps-row">
+          <span className="steps-icon" aria-hidden>
+            <Footprints size={18} strokeWidth={2.2} />
+          </span>
+          <input
+            inputMode="numeric"
+            pattern="[0-9]*"
+            placeholder="How many steps?"
+            aria-label="Steps"
+            value={stepsDraft ?? (stepsValue ? fmtSteps(Number(stepsValue)) : '')}
+            onChange={(e) => setStepsDraft(e.target.value.replace(/[^\d]/g, ''))}
+            onBlur={(e) => commitSteps(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+          />
+          <button className="icon-btn" aria-label="1,000 fewer steps" onClick={() => bumpSteps(-1000)} disabled={!visit.steps}>
+            <Minus size={15} />
+          </button>
+          <button className="icon-btn" aria-label="1,000 more steps" onClick={() => bumpSteps(1000)}>
+            <Plus size={15} />
+          </button>
         </div>
-        <p className="group-footer">Photos stay on this device. They’re resized to save space and never uploaded.</p>
+        <div className="steps-quick">
+          {[2000, 5000, 10000].map((n) => (
+            <button key={n} className="chip" onClick={() => void setVisitSteps(visitId, n)}>
+              {fmtSteps(n)}
+            </button>
+          ))}
+          <small>From your iPhone’s Health app, if you like.</small>
+        </div>
       </section>
 
-      {createPortal(
+      <p className="group-footer">Photos stay on this device. They’re resized to save space and never uploaded.</p>
+
       <AnimatePresence>
-        {viewed && (
-          <motion.div className="photo-viewer" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setViewing(null)}>
-            <motion.img src={viewed.url} alt="" layoutId={`photo-${viewed.photo.id}`} />
-            <div className="photo-viewer-bar" onClick={(e) => e.stopPropagation()}>
-              <button
-                className="icon-btn"
-                aria-label="Delete photo"
-                onClick={async () => {
-                  await removePhoto(viewed.photo)
-                  setViewing(null)
-                }}
-              >
-                <Trash size={16} />
-              </button>
-              <button className="icon-btn" aria-label="Close photo" onClick={() => setViewing(null)}>
-                <X size={16} />
-              </button>
-            </div>
-          </motion.div>
+        {viewing !== null && (
+          <PhotoViewer
+            key="viewer"
+            items={items}
+            start={viewing}
+            onClose={() => setViewing(null)}
+            onDelete={async (item) => {
+              const p = photos.find((x) => x.photo.id === item.id)
+              if (!p) return
+              const ok = await confirm({ title: 'Delete this photo?', message: 'It’s only on this device, so it can’t be recovered.', confirmLabel: 'Delete', destructive: true })
+              if (!ok) return
+              await removePhoto(p.photo)
+              setViewing(null)
+            }}
+          />
         )}
-      </AnimatePresence>,
-        document.body,
-      )}
+      </AnimatePresence>
     </Sheet>
   )
 }

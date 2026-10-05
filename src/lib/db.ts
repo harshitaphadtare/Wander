@@ -40,6 +40,8 @@ export interface Visit extends SyncFields {
   note?: string
   /** Photos stay on this device (see `photos`); ids are kept so the journal knows to look. */
   photoIds?: string[]
+  /** Steps you walked that day/outing, entered by hand. Syncs. */
+  steps?: number
 }
 
 export interface List extends SyncFields {
@@ -52,6 +54,8 @@ export interface Photo {
   id: string
   visitId: string
   blob: Blob
+  /** ~360 px version for map pins and strips (photos added before this existed have none). */
+  thumb?: Blob
   width: number
   height: number
   createdAt: number

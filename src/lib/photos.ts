@@ -9,28 +9,39 @@ import { db, type Photo } from './db'
 const MAX_EDGE = 1600
 const QUALITY = 0.8
 
-async function resize(file: File): Promise<{ blob: Blob; width: number; height: number }> {
-  // createImageBitmap honours EXIF orientation, so portrait iPhone shots stay upright.
-  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
-  const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height))
+const THUMB_EDGE = 360
+
+async function encode(bitmap: ImageBitmap, maxEdge: number, quality: number) {
+  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height))
   const width = Math.round(bitmap.width * scale)
   const height = Math.round(bitmap.height * scale)
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
   canvas.getContext('2d')!.drawImage(bitmap, 0, 0, width, height)
-  bitmap.close()
-  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/jpeg', QUALITY))
+  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/jpeg', quality))
   if (!blob) throw new Error('Couldn’t read that photo.')
   return { blob, width, height }
+}
+
+async function resize(file: File): Promise<{ blob: Blob; thumb: Blob; width: number; height: number }> {
+  // createImageBitmap honours EXIF orientation, so portrait iPhone shots stay upright.
+  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
+  try {
+    const full = await encode(bitmap, MAX_EDGE, QUALITY)
+    const small = await encode(bitmap, THUMB_EDGE, 0.75)
+    return { blob: full.blob, thumb: small.blob, width: full.width, height: full.height }
+  } finally {
+    bitmap.close()
+  }
 }
 
 export async function addPhotos(visitId: string, files: FileList | File[]): Promise<number> {
   const added: Photo[] = []
   for (const file of Array.from(files)) {
     if (!file.type.startsWith('image/')) continue
-    const { blob, width, height } = await resize(file)
-    added.push({ id: crypto.randomUUID(), visitId, blob, width, height, createdAt: Date.now() })
+    const { blob, thumb, width, height } = await resize(file)
+    added.push({ id: crypto.randomUUID(), visitId, blob, thumb, width, height, createdAt: Date.now() })
   }
   if (!added.length) return 0
   await db.transaction('rw', db.photos, db.visits, async () => {

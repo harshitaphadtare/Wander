@@ -640,15 +640,17 @@ a.btn.primary {
 }
 .memo textarea {
   width: 100%;
-  min-height: 92px;
-  padding: 14px 16px;
-  border-radius: 18px;
+  min-height: 64px;
+  max-height: 40dvh;
+  padding: 12px 14px;
+  border-radius: 16px;
   border: 1.5px solid transparent;
   background: var(--surface-2);
   font-family: var(--font-display);
-  font-size: 20px;
-  line-height: 1.3;
+  font-size: 18px;
+  line-height: 1.35;
   resize: none;
+  overflow-y: auto;
   outline: 0;
   transition: border-color 0.2s, background 0.2s;
 }
@@ -914,5 +916,425 @@ a.btn.primary {
   .skeleton-card,
   .skeleton-line {
     animation: none;
+  }
+}
+
+/* ---------- Minimisable sheets ---------- */
+/* Body + footer live in one wrapper so they can fold away together; it keeps
+   the sheet's flex column so the body still scrolls inside the max height. */
+.sheet-collapsible {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.sheet.is-collapsed .sheet-header {
+  cursor: pointer;
+  padding-bottom: 16px;
+}
+.sheet-header .icon-btn + .icon-btn {
+  margin-left: -4px;
+}
+
+
+/* ---------- Photos: carousel, strip, viewer ---------- */
+.carousel {
+  position: relative;
+  margin: 0 -20px;
+}
+.carousel-rail {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-padding: 0 20px;
+  padding: 0 20px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.carousel-rail::-webkit-scrollbar {
+  display: none;
+}
+.carousel-slide {
+  position: relative;
+  flex: 0 0 calc(100% - 40px);
+  aspect-ratio: 4 / 3;
+  scroll-snap-align: start;
+  border-radius: 20px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.carousel-slide img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.5s var(--ease-out);
+}
+.carousel-slide:active img {
+  transform: scale(0.985);
+}
+.carousel-date {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(20, 18, 15, 0.55);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.carousel-count {
+  position: absolute;
+  top: 12px;
+  right: 32px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(20, 18, 15, 0.55);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+}
+.carousel-dots {
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 10px;
+}
+.carousel-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--surface-3);
+  transition: width 0.25s var(--ease-out), background 0.25s;
+}
+.carousel-dots span.on {
+  width: 18px;
+  background: var(--ink);
+}
+
+.photo-strip {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.photo-strip-item {
+  position: relative;
+  width: 58px;
+  height: 58px;
+  flex: none;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface-3);
+}
+.photo-strip-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.photo-strip-more {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(20, 18, 15, 0.5);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.visit-photos {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.photo-add-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 26px 16px;
+  border-radius: 20px;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 40%, var(--surface-3));
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+  color: var(--accent);
+  text-align: center;
+}
+.photo-add-hero strong {
+  margin-top: 4px;
+  font-size: 15.5px;
+  color: var(--ink);
+}
+.photo-add-hero small {
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.photo-add-row {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 14px;
+  font-weight: 560;
+  color: var(--ink);
+}
+
+.viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: #0b0a09;
+}
+.viewer-rail {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+.viewer-rail::-webkit-scrollbar {
+  display: none;
+}
+.viewer-slide {
+  flex: 0 0 100%;
+  height: 100%;
+  scroll-snap-align: center;
+  display: grid;
+  place-items: center;
+  padding: calc(var(--safe-top) + 64px) 12px calc(var(--safe-bottom) + 24px);
+}
+.viewer-slide img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 14px;
+  object-fit: contain;
+}
+.viewer-bar {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: calc(var(--safe-top) + 10px) 14px 10px 18px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), transparent);
+  color: #fff;
+}
+.viewer-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.viewer-meta strong {
+  font-size: 15px;
+  font-weight: 600;
+}
+.viewer-meta small {
+  font-size: 12.5px;
+  opacity: 0.7;
+}
+.viewer-btn {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+.viewer-nav {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  translate: 0 -50%;
+  width: 44px;
+  height: 44px;
+  display: none;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+.viewer-nav.prev {
+  left: 16px;
+}
+.viewer-nav.next {
+  right: 16px;
+}
+@media (hover: hover) {
+  .viewer-nav {
+    display: grid;
+  }
+}
+
+/* Photo pins: the place's latest photo, with a count badge */
+.pin.has-photo .pin-body.pin-photo {
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border-radius: 14px;
+  border: 3px solid #fff;
+  background: #fff;
+  overflow: visible;
+}
+.pin.has-photo .pin-body.pin-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 11px;
+  display: block;
+}
+.pin.has-photo .pin-body.pin-photo::after {
+  background: #fff;
+  border-color: #fff;
+}
+.pin-photo-count {
+  position: absolute;
+  top: -8px;
+  right: -10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--c);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  border: 2px solid #fff;
+  z-index: 2;
+}
+
+.place-memories {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- Steps ---------- */
+.steps-field {
+  display: flex;
+  flex-direction: column;
+}
+.steps-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 12px;
+  border-radius: 16px;
+  background: var(--surface-2);
+}
+.steps-icon {
+  color: #12a187;
+  display: grid;
+}
+.steps-row input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.steps-row .icon-btn {
+  background: var(--surface);
+}
+.steps-quick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.steps-quick .chip {
+  height: 30px;
+  font-size: 13px;
+}
+.steps-quick small {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.steps-total {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: color-mix(in srgb, #12a187 9%, var(--surface));
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.steps-total svg {
+  color: #12a187;
+}
+.steps-total strong {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Journal cards are div[role=button] now, since they hold photo buttons. */
+.timeline-card {
+  cursor: pointer;
+  align-items: flex-start;
+}
+.timeline-card .row-text {
+  min-width: 0;
+}
+
+/* ---------- Typography on phones ----------
+   A slightly tighter scale under 400 px so titles, buttons and rows keep their
+   proportions on an iPhone 15 (393 pt) and smaller. */
+@media (max-width: 400px) {
+  .sheet-titles h2 {
+    font-size: 28px;
+    line-height: 1.08;
+    text-wrap: balance;
+  }
+  .eyebrow {
+    font-size: 12.5px;
+  }
+  .btn {
+    height: 48px;
+    font-size: 15px;
+  }
+  .row-text strong {
+    font-size: 15px;
+  }
+  .chip-row .chip {
+    font-size: 13px;
+  }
+  .mood-tile {
+    min-height: 100px;
+    padding: 12px;
+  }
+  .mood-tile strong {
+    font-size: 15px;
+  }
+  .pick-reason {
+    font-size: 17.5px;
+  }
+  .wrapped-hero strong {
+    font-size: 72px;
+  }
+  .stat-card .num {
+    font-size: 30px;
   }
 }

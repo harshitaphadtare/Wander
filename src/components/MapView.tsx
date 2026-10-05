@@ -441,6 +441,7 @@ export default function MapView({
     if (!map) return
     if (fog) map.getSource<GeoJSONSource>('fog')?.setData(fog)
     if (map.getLayer('fog')) map.setPaintProperty('fog', 'fill-opacity', fog ? FOG_OPACITY : 0)
+    if (map.getLayer('fog-edge')) map.setPaintProperty('fog-edge', 'line-opacity', fog ? 0.75 : 0)
   }, [fog])
 
   return (
@@ -634,7 +635,7 @@ function addHeatLayer(map: MLMap, data: GeoJSON.FeatureCollection | null) {
   )
 }
 
-const FOG_OPACITY = ['*', 0.78, ['get', 'o']] as unknown as number
+const FOG_OPACITY = ['*', 0.9, ['get', 'o']] as unknown as number
 
 /** Unexplored hexes as soft mist, under the labels so street names stay readable. */
 function addFogLayer(map: MLMap, data: GeoJSON.FeatureCollection | null) {
@@ -646,11 +647,29 @@ function addFogLayer(map: MLMap, data: GeoJSON.FeatureCollection | null) {
       id: 'fog',
       type: 'fill',
       source: 'fog',
+      filter: ['!=', ['get', 'kind'], 'edge'],
       paint: {
-        'fill-color': '#eceae4',
+        'fill-color': '#e3e4e6',
         'fill-antialias': false,
         'fill-opacity': data ? FOG_OPACITY : 0,
         'fill-opacity-transition': { duration: 700, delay: 0 },
+      },
+    },
+    firstLabel,
+  )
+  // The measured suburb's boundary, as a soft dashed outline.
+  map.addLayer(
+    {
+      id: 'fog-edge',
+      type: 'line',
+      source: 'fog',
+      filter: ['==', ['get', 'kind'], 'edge'],
+      layout: { 'line-join': 'round' },
+      paint: {
+        'line-color': '#F2542D',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.5, 16, 3],
+        'line-dasharray': [2, 1.5],
+        'line-opacity': data ? 0.75 : 0,
       },
     },
     firstLabel,

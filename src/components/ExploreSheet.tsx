@@ -18,7 +18,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { PlaceWithStats } from '../hooks/useData'
 import { aiAvailable } from '../lib/ai'
 import type { Pick, PickItem } from '../lib/db'
@@ -83,6 +83,10 @@ export default function ExploreSheet({ at, approximate, places, onShow, onFocus,
   const [saved, setSaved] = useState<Set<string>>(new Set())
   const shown = useRef(new Set<string>())
   const ctrl = useRef<AbortController | null>(null)
+  /** New food: everything found on the last fresh search, for the cuisine chips. */
+  const [basePool, setBasePool] = useState<ExplorePick[]>([])
+  const [cuisine, setCuisine] = useState<string | null>(null)
+  const [cuisinePage, setCuisinePage] = useState(0)
 
   const mood = stage.kind === 'results' ? stage.mood : null
 
@@ -92,7 +96,11 @@ export default function ExploreSheet({ at, approximate, places, onShow, onFocus,
       ctrl.current?.abort()
       const c = new AbortController()
       ctrl.current = c
-      if (fresh) shown.current = new Set()
+      if (fresh) {
+        shown.current = new Set()
+        setCuisine(null)
+        setCuisinePage(0)
+      }
       setLoading(true)
       setError(null)
       try {
@@ -104,6 +112,7 @@ export default function ExploreSheet({ at, approximate, places, onShow, onFocus,
           return run(m, s + 1, false)
         }
         r.picks.forEach((p) => shown.current.add(p.id))
+        if (fresh) setBasePool(r.pool)
         setResult(r)
         onShow({ picks: r.picks, loop: r.loop ?? null })
       } catch (err) {
@@ -140,8 +149,40 @@ export default function ExploreSheet({ at, approximate, places, onShow, onFocus,
     setLoading(false)
     onShow({ picks: [], loop: null })
   }
+  // ---- New food: cuisine chips, built from what's actually around you ----
+  const cuisines = useMemo(() => {
+    if (mood !== 'food') return []
+    const counts = new Map<string, number>()
+    for (const p of basePool) {
+      const c = cuisineOf(p)
+      if (c) counts.set(c, (counts.get(c) ?? 0) + 1)
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([c]) => c)
+  }, [basePool, mood])
+  const byCuisine = useMemo(() => (cuisine ? basePool.filter((p) => cuisineOf(p) === cuisine) : []), [basePool, cuisine])
+  const cuisinePicks = useMemo(() => {
+    if (!cuisine || !byCuisine.length) return null
+    const pages = Math.ceil(byCuisine.length / 4)
+    const start = (cuisinePage % pages) * 4
+    return byCuisine.slice(start, start + 4)
+  }, [byCuisine, cuisine, cuisinePage])
+  const picks = cuisinePicks ?? result?.picks ?? []
+  // Keep the map pins in step with the chosen cuisine.
+  useEffect(() => {
+    if (cuisinePicks) onShow({ picks: cuisinePicks, loop: null })
+    else if (cuisine === null && result && !result.loop) onShow({ picks: result.picks, loop: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cuisinePicks, cuisine])
+
   const shuffle = () => {
     if (!mood) return
+    if (cuisine) {
+      setCuisinePage((p) => p + 1)
+      return
+    }
     const next = seed + 1
     setSeed(next)
     void run(mood, next, false)
@@ -207,6 +248,27 @@ export default function ExploreSheet({ at, approximate, places, onShow, onFocus,
         <>
           <Limits time={time} reach={reach} onTime={setTime} onReach={setReach} compact hideReach={mood === 'stroll'} />
           {result?.context && <ContextLine ctx={result.context} ai={result.ai} />}
+          {cuisines.length > 1 && !loading && (
+            <motion.div className="chips scroll cuisine-chips" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} role="radiogroup" aria-label="Cuisine">
+              <button role="radio" aria-checked={cuisine === null} className={`chip ${cuisine === null ? 'is-on solid' : ''}`} onClick={() => setCuisine(null)}>
+                Any
+              </button>
+              {cuisines.map((c) => (
+                <button
+                  key={c}
+                  role="radio"
+                  aria-checked={cuisine === c}
+                  className={`chip ${cuisine === c ? 'is-on solid' : ''}`}
+                  onClick={() => {
+                    setCuisine(cuisine === c ? null : c)
+                    setCuisinePage(0)
+                  }}
+                >
+                  {titleCase(c)}
+                </button>
+              ))}
+            </motion.div>
+          )}
           <AnimatePresence mode="wait">
             {loading ? (
               <motion.div key="loading" className="explore-loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -223,13 +285,13 @@ export default function ExploreSheet({ at, approximate, places, onShow, onFocus,
               </motion.div>
             ) : result?.loop ? (
               <LoopCard key={`loop-${seed}`} loop={result.loop} weather={result.context.weather} />
-            ) : result && result.picks.length === 0 ? (
+            ) : result && picks.length === 0 ? (
               <motion.div key="none" className="explore-empty" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
                 <p>Nothing fits right now. Try more time or a bigger radius.</p>
               </motion.div>
             ) : (
-              <motion.ul key={`picks-${seed}`} className="pick-list">
-                {result?.picks.map((p, i) => (
+              <motion.ul key={`picks-${seed}-${cuisine}-${cuisinePage}`} className="pick-list">
+                {picks.map((p, i) => (
                   <PickCard
                     key={p.id}
                     pick={p}
@@ -318,6 +380,13 @@ function ContextLine({ ctx, ai }: { ctx: ExploreResult['context']; ai: boolean }
 }
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1)
+const titleCase = (s: string) => s.replace(/(^|\s)\w/g, (c) => c.toUpperCase())
+/** One cuisine per place, lower-case ("thai", "pizza"); cafés without a tag count as "coffee". */
+function cuisineOf(p: ExplorePick): string | null {
+  const c = p.cuisine?.toLowerCase().trim()
+  if (c) return c === 'coffee shop' ? 'coffee' : c
+  return p.category === 'cafe' ? 'coffee' : p.category === 'ice_cream' ? 'ice cream' : p.category === 'bakery' ? 'bakery' : null
+}
 
 function PickCard({
   pick,

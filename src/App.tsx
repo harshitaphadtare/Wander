@@ -28,6 +28,7 @@ import { useWalkPlanner, type WalkTarget } from './hooks/useWalkPlanner'
 import { DESKTOP_QUERY } from './hooks/useMedia'
 import { distanceM, formatDistance, geoErrorMessage, getCurrentPosition, type LatLng } from './lib/geo'
 import { computeFog } from './lib/fog'
+import { suburbAt, type Suburb } from './lib/suburb'
 import { heatFor } from './lib/heat'
 import { weeklyStreak } from './lib/streak'
 import type { WrappedPeriod } from './lib/wrapped'
@@ -479,15 +480,44 @@ export default function App() {
     if (heatOn) map.current?.fitPoints(heatCoords.current, heatPadding())
   }, [heatOn, period])
 
+  // The real suburb boundary around where you're looking (null = 1.5 km circle fallback).
+  const [fogSuburb, setFogSuburb] = useState<{ at: LatLng; suburb: Suburb | null } | null>(null)
+  useEffect(() => {
+    if (!fogAt) return
+    const ctrl = new AbortController()
+    suburbAt(fogAt, ctrl.signal)
+      .catch(() => null)
+      .then((suburb) => {
+        if (!ctrl.signal.aborted) setFogSuburb({ at: fogAt, suburb })
+      })
+    return () => ctrl.abort()
+  }, [fogAt])
+  const suburbReady = !!fogAt && fogSuburb?.at === fogAt
   const fog = useMemo(
-    () => (fogAt ? computeFog(fogAt, allPlaces.filter((p) => p.visitCount > 0), walks ?? []) : null),
-    [fogAt, allPlaces, walks],
+    () =>
+      fogAt && suburbReady
+        ? computeFog(fogAt, allPlaces.filter((p) => p.visitCount > 0), walks ?? [], fogSuburb?.suburb ?? null)
+        : null,
+    [fogAt, suburbReady, fogSuburb, allPlaces, walks],
   )
   const openFog = () => {
     setSheet(null)
     setHeatOn(false)
     setFogAt(map.current?.getCenter() ?? here)
   }
+  // Frame the whole suburb once its boundary arrives.
+  useEffect(() => {
+    const b = fogSuburb?.suburb?.bbox
+    if (fogAt && fogSuburb?.at === fogAt && b) {
+      map.current?.fitPoints(
+        [
+          [b[0], b[1]],
+          [b[2], b[3]],
+        ],
+        heatPadding(),
+      )
+    }
+  }, [fogSuburb, fogAt])
   const setMapMode = (mode: MapMode) => (mode === 'fog' ? openFog() : openHeat())
   const streakWeeks = useMemo(() => weeklyStreak(visits ?? []).weeks, [visits])
 
@@ -680,7 +710,7 @@ export default function App() {
         {heat && (
           <HeatBar key="heat-bar" period={period} summary={heat} onPeriod={setPeriod} onMode={setMapMode} onClose={() => setHeatOn(false)} />
         )}
-        {fog && fogAt && <FogBar key="fog-bar" center={fogAt} fog={fog} onMode={setMapMode} onClose={() => setFogAt(null)} />}
+        {fog && fogAt && <FogBar key="fog-bar" fog={fog} onMode={setMapMode} onClose={() => setFogAt(null)} />}
       </AnimatePresence>
 
       {!active.walk && !mapMode && (

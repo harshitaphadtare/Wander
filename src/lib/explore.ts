@@ -138,7 +138,12 @@ async function candidates(tags: string[], at: LatLng, radiusM: number, signal?: 
   const around = `around:${radiusM},${at.lat.toFixed(4)},${at.lng.toFixed(4)}`
   const query = `[out:json][timeout:25];(${tags.map((t) => `nwr(${around})${t}["name"];`).join('')});out center tags 250;`
   const seen = new Set<string>()
-  const list = (await overpass(query, signal))
+  // The free servers are often busy: one patient retry before giving up.
+  const elements = await overpass(query, signal).catch((err) => {
+    if (signal?.aborted) throw err
+    return overpass(query, signal, 30_000)
+  })
+  const list = elements
     .map(toCandidate)
     .filter((c): c is Candidate => {
       if (!c) return false
@@ -223,7 +228,7 @@ const NEW_LINES: Record<string, string> = {
 }
 
 function fallbackReason(mood: Mood, p: Omit<ExplorePick, 'reason' | 'score'>, ctx: ExploreContext, rarity: number): string {
-  const cuisine = p.cuisine && (p.category === 'restaurant' || p.category === 'fast_food') ? p.cuisine.replace(/\w/g, (c) => c.toUpperCase()) : null
+  const cuisine = p.cuisine && (p.category === 'restaurant' || p.category === 'fast_food') ? p.cuisine.replace(/(^|\s)\w/g, (c) => c.toUpperCase()) : null
   const kind = cuisine ? `${cuisine} place` : prettyKind(p.category)
   const a = /^[aeiou]/i.test(kind) ? 'An' : 'A'
   if (p.wishlist) return `It's been on your wishlist. Today's a good day for it.`

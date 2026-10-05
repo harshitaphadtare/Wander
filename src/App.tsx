@@ -1,7 +1,11 @@
+import simplify from '@turf/simplify'
+import { lineString } from '@turf/helpers'
 import { Flame, LocateFixed } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Dock, { type Tab } from './components/Dock'
+import ExploreSheet, { type ExploreShow } from './components/ExploreSheet'
+import FogBar, { type MapMode } from './components/FogBar'
 import HeatBar from './components/HeatBar'
 import JournalPanel from './components/JournalPanel'
 import MapView, { type MapHandle, type Padding, type StopMarker } from './components/MapView'
@@ -12,15 +16,21 @@ import PlacesPanel from './components/PlacesPanel'
 import SearchBar from './components/SearchBar'
 import SettingsPanel from './components/SettingsPanel'
 import WalkBanner from './components/WalkBanner'
+import VisitSheet from './components/VisitSheet'
 import WalkSheet, { stopColor } from './components/WalkSheet'
+import WrappedSheet from './components/WrappedSheet'
+import './features.css'
 import { useActiveWalk } from './hooks/useActiveWalk'
 import { useAutoDetect } from './hooks/useAutoDetect'
-import { usePlaces, useVisits, type PlaceWithStats } from './hooks/useData'
+import { useLists, usePlaces, useVisits, useWalks, type PlaceWithStats } from './hooks/useData'
 import { useGeolocation } from './hooks/useGeolocation'
 import { useWalkPlanner, type WalkTarget } from './hooks/useWalkPlanner'
 import { DESKTOP_QUERY } from './hooks/useMedia'
 import { distanceM, formatDistance, geoErrorMessage, getCurrentPosition, type LatLng } from './lib/geo'
+import { computeFog } from './lib/fog'
 import { heatFor } from './lib/heat'
+import { weeklyStreak } from './lib/streak'
+import type { WrappedPeriod } from './lib/wrapped'
 import { periodStart, type Period } from './lib/periods'
 import { levelFor } from './lib/levels'
 import { reverseGeocode, type PhotonPlace } from './lib/photon'
@@ -47,6 +57,9 @@ type SheetState =
   | { type: 'walk'; target: WalkTarget; origin: LatLng }
   | { type: 'places' }
   | { type: 'journal' }
+  | { type: 'explore' }
+  | { type: 'visit'; id: string }
+  | { type: 'wrapped'; period: WrappedPeriod }
   | { type: 'settings' }
   | null
 
@@ -79,17 +92,32 @@ function heatPadding(): Padding {
   return { top: 230, bottom: 170, left: 50, right: 50 }
 }
 
+/** A walk's route, thinned to ~100 points: enough to clear the fog along it, small enough to sync. */
+function simplifiedPath(coords: [number, number][]): [number, number][] {
+  if (coords.length < 3) return coords
+  let tolerance = 0.00003
+  let line = simplify(lineString(coords), { tolerance })
+  while (line.geometry.coordinates.length > 100 && tolerance < 0.005) {
+    tolerance *= 2
+    line = simplify(lineString(coords), { tolerance })
+  }
+  return line.geometry.coordinates.map(([lng, lat]) => [Math.round(lng * 1e5) / 1e5, Math.round(lat * 1e5) / 1e5])
+}
+
 function sheetKey(s: NonNullable<SheetState>): string {
   if (s.type === 'place') return `place-${s.id}`
   if (s.type === 'result') return `result-${s.result.lat},${s.result.lng}`
   if (s.type === 'pick') return `pick-${s.at.lat},${s.at.lng}`
   if (s.type === 'walk') return `walk-${s.target.lat},${s.target.lng}`
+  if (s.type === 'visit') return `visit-${s.id}`
   return s.type
 }
 
 export default function App() {
   const places = usePlaces()
   const visits = useVisits()
+  const lists = useLists()
+  const walks = useWalks()
   const geo = useGeolocation()
   const confirm = useConfirm()
   const map = useRef<MapHandle>(null)
@@ -104,6 +132,9 @@ export default function App() {
   /** Shared by the Journal and the heatmap so they always show the same stretch of time. */
   const [period, setPeriod] = useState<Period>('week')
   const [heatOn, setHeatOn] = useState(false)
+  /** Explored % mode, measured around where the map was when it opened. */
+  const [fogAt, setFogAt] = useState<LatLng | null>(null)
+  const [exploreShow, setExploreShow] = useState<ExploreShow>({ picks: [], loop: null })
   const pendingLocate = useRef(false)
   const tilePois = useCallback(
     (coords: [number, number][], radiusM: number) => map.current?.poisAlong(coords, radiusM) ?? Promise.resolve([]),
@@ -286,6 +317,7 @@ export default function App() {
         distanceM: planner.route.distanceM,
         durationS: planner.route.durationS,
         startedAt: Date.now(),
+        path: simplifiedPath(planner.route.coords),
       })
       active.begin({
         walkId: walk.id,
@@ -386,8 +418,18 @@ export default function App() {
     return null
   }, [sheet, active.walk])
 
-  const mapRoute = sheet?.type === 'walk' ? (planner.route?.coords ?? null) : !sheet ? (active.walk?.route.coords ?? null) : null
+  const mapRoute =
+    sheet?.type === 'walk'
+      ? (planner.route?.coords ?? null)
+      : sheet?.type === 'explore'
+        ? (exploreShow.loop?.coords ?? null)
+        : !sheet
+          ? (active.walk?.route.coords ?? null)
+          : null
   const stopMarkers = useMemo<StopMarker[]>(() => {
+    if (sheet?.type === 'explore') {
+      return exploreShow.picks.map((p) => ({ id: p.id, name: p.name, lat: p.lat, lng: p.lng, category: p.category, color: '#F2542D', closed: false }))
+    }
     if (sheet?.type === 'walk') {
       return (planner.stops ?? []).map((s) => ({
         id: s.osmId,
@@ -401,7 +443,19 @@ export default function App() {
     }
     const st = !sheet && active.walk?.stop
     return st ? [{ id: st.osmId, name: st.name, lat: st.lat, lng: st.lng, category: st.category, color: '#F2542D', closed: false }] : []
-  }, [sheet, planner.stops, active.walk])
+  }, [sheet, planner.stops, active.walk, exploreShow])
+
+  // Frame explore picks / a stroll loop as they arrive.
+  useEffect(() => {
+    if (sheet?.type !== 'explore') return
+    if (exploreShow.loop) map.current?.fitRoute(exploreShow.loop.coords, routePadding(true))
+    else if (exploreShow.picks.length > 1) map.current?.fitRoute(exploreShow.picks.map((p) => [p.lng, p.lat]), routePadding(true))
+    else if (exploreShow.picks[0]) flyTo(exploreShow.picks[0], true, 15)
+  }, [exploreShow, sheet?.type, flyTo])
+  // Leaving Explore clears its pins and loop.
+  useEffect(() => {
+    if (sheet?.type !== 'explore') setExploreShow((s) => (s.picks.length || s.loop ? { picks: [], loop: null } : s))
+  }, [sheet?.type])
 
   // Show the whole route (and refit when a stop reshapes it).
   useEffect(() => {
@@ -425,8 +479,21 @@ export default function App() {
     if (heatOn) map.current?.fitPoints(heatCoords.current, heatPadding())
   }, [heatOn, period])
 
+  const fog = useMemo(
+    () => (fogAt ? computeFog(fogAt, allPlaces.filter((p) => p.visitCount > 0), walks ?? []) : null),
+    [fogAt, allPlaces, walks],
+  )
+  const openFog = () => {
+    setSheet(null)
+    setHeatOn(false)
+    setFogAt(map.current?.getCenter() ?? here)
+  }
+  const setMapMode = (mode: MapMode) => (mode === 'fog' ? openFog() : openHeat())
+  const streakWeeks = useMemo(() => weeklyStreak(visits ?? []).weeks, [visits])
+
   const openHeat = () => {
     setSheet(null)
+    setFogAt(null)
     setHeatOn(true)
     // Don't open on an empty map: widen to the first period that has visits.
     const order: Period[] = ['week', 'month', 'year', 'all']
@@ -435,15 +502,19 @@ export default function App() {
     const firstWithData = order.slice(from).find((p) => all.some((v) => v.arrivedAt >= periodStart(p)))
     if (firstWithData) setPeriod(firstWithData)
   }
-  // Opening any sheet (check in, a tab, a dropped pin) steps out of heat mode.
+  // Opening any sheet (check in, a tab, a dropped pin) steps out of heat / fog mode.
   useEffect(() => {
-    if (sheet) setHeatOn(false)
+    if (sheet) {
+      setHeatOn(false)
+      setFogAt(null)
+    }
   }, [sheet])
 
   const close = () => setSheet(null)
-  const tab: Tab | null = sheet?.type === 'places' || sheet?.type === 'journal' ? sheet.type : null
+  const tab: Tab | null = sheet?.type === 'places' || sheet?.type === 'journal' || sheet?.type === 'explore' ? sheet.type : null
+  const mapMode = heatOn || !!fogAt
   const toggleTab = (t: Tab) => setSheet(tab === t ? null : { type: t })
-  const showNearby = !!nearbyPlace && !sheet && !heatOn
+  const showNearby = !!nearbyPlace && !sheet && !mapMode
 
   const renderSheet = () => {
     switch (sheet?.type) {
@@ -453,7 +524,9 @@ export default function App() {
             key={sheetKey(sheet)}
             place={selectedPlace}
             from={here}
+            lists={lists ?? []}
             busy={busy}
+            onVisit={(id) => setSheet({ type: 'visit', id })}
             onCheckIn={() => withBusy(() => checkIn(selectedPlace.id, selectedPlace.name, selectedPlace))}
             onWalk={() => walkTo({ ...selectedPlace, placeId: selectedPlace.id })}
             onClose={close}
@@ -492,7 +565,7 @@ export default function App() {
       case 'walk':
         return <WalkSheet key={sheetKey(sheet)} target={sheet.target} planner={planner} onStart={beginWalk} onClose={close} />
       case 'places':
-        return <PlacesPanel key="places" places={allPlaces} from={here} onPick={openPlace} onClose={close} />
+        return <PlacesPanel key="places" places={allPlaces} lists={lists ?? []} from={here} onPick={openPlace} onClose={close} />
       case 'journal':
         return (
           <JournalPanel
@@ -501,8 +574,45 @@ export default function App() {
             places={allPlaces}
             period={period}
             onPeriod={setPeriod}
-            onPick={openPlace}
             onHeatmap={openHeat}
+            onVisit={(id) => setSheet({ type: 'visit', id })}
+            onWrapped={() => setSheet({ type: 'wrapped', period: period === 'year' || period === 'all' ? 'year' : 'month' })}
+            onClose={close}
+          />
+        )
+      case 'explore':
+        return (
+          <ExploreSheet
+            key="explore"
+            at={here ?? map.current?.getCenter() ?? null}
+            approximate={!here}
+            places={allPlaces}
+            onShow={setExploreShow}
+            onFocus={(at) => flyTo(at, true, 16)}
+            onWalk={(t) => walkTo(t)}
+            onSave={async (input) => {
+              await savePlace(input)
+              notify(`Added ${input.name} to Want to go`, 'success')
+            }}
+            onClose={close}
+          />
+        )
+      case 'visit': {
+        const v = visits?.find((x) => x.id === sheet.id)
+        const p = v && allPlaces.find((x) => x.id === v.placeId)
+        return p ? (
+          <VisitSheet key={sheetKey(sheet)} visitId={sheet.id} place={p} notify={notify} onOpenPlace={() => openPlace(p)} onClose={close} />
+        ) : null
+      }
+      case 'wrapped':
+        return (
+          <WrappedSheet
+            key="wrapped"
+            visits={visits ?? []}
+            places={allPlaces}
+            walks={walks ?? []}
+            streakWeeks={streakWeeks}
+            initial={sheet.period}
             onClose={close}
           />
         )
@@ -525,7 +635,7 @@ export default function App() {
 
   return (
     <div
-      className={`app ${sheet ? 'has-sheet' : ''} ${sheet && !tab && sheet.type !== 'settings' ? 'has-detail' : ''} ${showNearby ? 'has-nearby' : ''} ${heatOn ? 'has-heat' : ''}`}
+      className={`app ${sheet ? 'has-sheet' : ''} ${sheet && !tab && sheet.type !== 'settings' ? 'has-detail' : ''} ${showNearby ? 'has-nearby' : ''} ${mapMode ? 'has-heat' : ''}`}
     >
       <MapView
         ref={map}
@@ -544,9 +654,15 @@ export default function App() {
         }}
         route={mapRoute}
         heat={heat?.data ?? null}
+        fog={fog?.data ?? null}
         stops={stopMarkers}
         selectedStopId={sheet?.type === 'walk' ? (planner.stop?.osmId ?? null) : null}
         onStopClick={(id) => {
+          if (sheet?.type === 'explore') {
+            const p = exploreShow.picks.find((x) => x.id === id)
+            if (p) flyTo(p, true, 16)
+            return
+          }
           if (sheet?.type !== 'walk') return
           const s = planner.stops?.find((x) => x.osmId === id)
           if (s) planner.setStop(planner.stop?.osmId === id ? null : s)
@@ -562,11 +678,12 @@ export default function App() {
 
       <AnimatePresence>
         {heat && (
-          <HeatBar key="heat-bar" period={period} summary={heat} onPeriod={setPeriod} onClose={() => setHeatOn(false)} />
+          <HeatBar key="heat-bar" period={period} summary={heat} onPeriod={setPeriod} onMode={setMapMode} onClose={() => setHeatOn(false)} />
         )}
+        {fog && fogAt && <FogBar key="fog-bar" center={fogAt} fog={fog} onMode={setMapMode} onClose={() => setFogAt(null)} />}
       </AnimatePresence>
 
-      {!active.walk && !heatOn && (
+      {!active.walk && !mapMode && (
         <SearchBar
           places={allPlaces}
         near={() => here ?? map.current?.getCenter() ?? null}
@@ -592,10 +709,15 @@ export default function App() {
 
       {!active.walk && (
         <motion.button
-          className={`fab heat glass ${heatOn ? 'is-on' : ''}`}
-          onClick={() => (heatOn ? setHeatOn(false) : openHeat())}
-          aria-label={heatOn ? 'Hide heatmap' : 'Show heatmap'}
-          aria-pressed={heatOn}
+          className={`fab heat glass ${mapMode ? 'is-on' : ''}`}
+          onClick={() => {
+            if (mapMode) {
+              setHeatOn(false)
+              setFogAt(null)
+            } else openHeat()
+          }}
+          aria-label={mapMode ? 'Hide heatmap' : 'Show heatmap and explored %'}
+          aria-pressed={mapMode}
           whileTap={{ scale: 0.9 }}
         >
           <Flame size={21} strokeWidth={2.2} />

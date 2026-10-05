@@ -68,6 +68,8 @@ interface Props {
   onStopClick?(id: string): void
   /** Visit heatmap; while set, saved-place pins step aside. */
   heat?: GeoJSON.FeatureCollection | null
+  /** Explored % mist: unexplored hexes. */
+  fog?: GeoJSON.FeatureCollection | null
 }
 
 function savedView(): { center: [number, number]; zoom: number } | null {
@@ -107,6 +109,7 @@ export default function MapView({
   selectedStopId = null,
   onStopClick,
   heat = null,
+  fog = null,
 }: Props) {
   const container = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MLMap | null>(null)
@@ -117,6 +120,7 @@ export default function MapView({
   const fixRef = useRef(fix)
   const routeRef = useRef(route)
   const heatRef = useRef(heat)
+  const fogRef = useRef(fog)
   const stopMarkers = useRef(new Map<string, { marker: maplibregl.Marker; el: HTMLDivElement }>())
   const [stopHosts, setStopHosts] = useState<Map<string, HTMLDivElement>>(new Map())
   // Bumped when pin host elements are added/removed so the portals re-render.
@@ -129,6 +133,7 @@ export default function MapView({
     fixRef.current = fix
     routeRef.current = route
     heatRef.current = heat
+    fogRef.current = fog
   })
 
   useImperativeHandle(ref, () => ({
@@ -214,6 +219,7 @@ export default function MapView({
       tuneBaseStyle(map)
       addRouteLayers(map, routeRef.current)
       addHeatLayer(map, heatRef.current)
+      addFogLayer(map, fogRef.current)
       if (!map.getSource('me')) map.addSource('me', { type: 'geojson', data: accuracyData(fixRef.current) })
       if (!map.getLayer('me-accuracy')) {
         map.addLayer({
@@ -429,8 +435,16 @@ export default function MapView({
     if (map.getLayer('heat')) map.setPaintProperty('heat', 'heatmap-opacity', heat ? HEAT_OPACITY : 0)
   }, [heat])
 
+  // Mist settles in or lifts; the old shape stays while it fades out.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    if (fog) map.getSource<GeoJSONSource>('fog')?.setData(fog)
+    if (map.getLayer('fog')) map.setPaintProperty('fog', 'fill-opacity', fog ? FOG_OPACITY : 0)
+  }, [fog])
+
   return (
-    <div ref={container} className={`map ${heat ? 'is-heat' : ''}`}>
+    <div ref={container} className={`map ${heat ? 'is-heat' : ''} ${fog ? 'is-fog' : ''}`}>
       {stops.map((s) => {
         const host = stopHosts.get(s.id)
         if (!host) return null
@@ -614,6 +628,29 @@ function addHeatLayer(map: MLMap, data: GeoJSON.FeatureCollection | null) {
         ],
         'heatmap-opacity': data ? HEAT_OPACITY : 0,
         'heatmap-opacity-transition': { duration: 600, delay: 0 },
+      },
+    },
+    firstLabel,
+  )
+}
+
+const FOG_OPACITY = ['*', 0.78, ['get', 'o']] as unknown as number
+
+/** Unexplored hexes as soft mist, under the labels so street names stay readable. */
+function addFogLayer(map: MLMap, data: GeoJSON.FeatureCollection | null) {
+  if (!map.getSource('fog')) map.addSource('fog', { type: 'geojson', data: data ?? EMPTY })
+  if (map.getLayer('fog')) return
+  const firstLabel = map.getStyle().layers.find((l) => l.type === 'symbol')?.id
+  map.addLayer(
+    {
+      id: 'fog',
+      type: 'fill',
+      source: 'fog',
+      paint: {
+        'fill-color': '#eceae4',
+        'fill-antialias': false,
+        'fill-opacity': data ? FOG_OPACITY : 0,
+        'fill-opacity-transition': { duration: 700, delay: 0 },
       },
     },
     firstLabel,

@@ -115,3 +115,40 @@ export function prettyCategory(category?: string) {
   const s = category.replace(/_/g, ' ')
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
+
+export interface PhotonArea {
+  id: string
+  name: string
+  lat: number
+  lng: number
+  /** suburb, neighbourhood, town… */
+  kind: string
+}
+
+/** Named areas (suburbs, towns) around a point, nearest first. Much lighter than an Overpass area query. */
+export async function nearbyAreas(at: LatLng, radiusKm: number, kinds: string[], signal?: AbortSignal): Promise<PhotonArea[]> {
+  const params = new URLSearchParams({
+    lat: at.lat.toFixed(2),
+    lon: at.lng.toFixed(2),
+    radius: String(radiusKm),
+    limit: '50',
+    lang: 'en',
+  })
+  for (const k of kinds) params.append('osm_tag', `place:${k}`)
+  const res = await fetch(`${BASE}/reverse?${params}`, { signal })
+  if (!res.ok) throw new Error(`Search failed (${res.status})`)
+  const data = (await res.json()) as { features: PhotonFeature[] }
+  return data.features.flatMap((f) =>
+    f.properties.name
+      ? [
+          {
+            id: `${f.properties.osm_type ?? 'N'}${f.properties.osm_id ?? f.properties.name}`,
+            name: f.properties.name,
+            lat: f.geometry.coordinates[1],
+            lng: f.geometry.coordinates[0],
+            kind: f.properties.osm_value ?? 'area',
+          },
+        ]
+      : [],
+  )
+}

@@ -15,14 +15,12 @@
   justify-content: center;
 }
 .auth-logo {
-  width: 48px;
-  height: 48px;
   display: grid;
-  place-items: center;
   border-radius: 15px;
-  color: var(--accent);
-  background: linear-gradient(160deg, #fff, var(--accent-soft));
-  box-shadow: var(--shadow-sm), inset 0 0 0 1px rgba(242, 84, 45, 0.12);
+  filter: drop-shadow(0 10px 18px rgba(226, 62, 26, 0.3));
+}
+.auth-logo img {
+  display: block;
 }
 
 .auth-head {
@@ -450,88 +448,197 @@ li.ok .strength-check {
   box-shadow: var(--shadow-sheet);
 }
 
-.auth-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: grid;
-  place-items: center;
-  padding: 24px 16px;
-  overflow-y: auto;
-}
-.auth-scrim {
-  position: fixed;
-  inset: 0;
-  background: rgba(20, 18, 15, 0.38);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-}
-.auth-card.dialog {
-  background: var(--surface);
-}
-.auth-close {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  z-index: 2;
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--surface-2);
-  color: var(--ink-2);
-  transition: background 0.2s, transform 0.3s var(--ease-out);
-}
-.auth-close:hover {
-  background: var(--surface-3);
-  transform: rotate(90deg);
-}
-
-/* Full-page version: installed app and reset-password link */
+/* /login, /signup, /reset-password */
 .auth-page {
   position: fixed;
-  inset: 0;
+  inset: 0 0 auto 0;
+  height: var(--app-h, 100dvh);
   display: grid;
+  grid-template-columns: 1fr;
+  background: var(--bg);
+  overflow: hidden;
+}
+.auth-page.single {
   place-items: center;
   padding: calc(var(--safe-top) + 20px) 16px calc(var(--safe-bottom) + 20px);
   overflow-y: auto;
-  background: var(--bg);
+}
+.auth-main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: calc(var(--safe-top) + 64px) 20px calc(var(--safe-bottom) + 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.auth-main > * {
+  position: relative;
 }
 .auth-page-glow {
-  position: fixed;
+  position: absolute !important;
   inset: -20%;
   background:
-    radial-gradient(40% 35% at 20% 15%, rgba(242, 84, 45, 0.22), transparent 70%),
-    radial-gradient(35% 30% at 85% 80%, rgba(47, 123, 246, 0.16), transparent 70%),
-    radial-gradient(30% 30% at 80% 10%, rgba(242, 157, 12, 0.16), transparent 70%);
+    radial-gradient(40% 35% at 20% 15%, rgba(242, 84, 45, 0.2), transparent 70%),
+    radial-gradient(35% 30% at 85% 80%, rgba(47, 123, 246, 0.14), transparent 70%),
+    radial-gradient(30% 30% at 80% 10%, rgba(242, 157, 12, 0.14), transparent 70%);
   filter: blur(20px);
   animation: auth-drift 18s ease-in-out infinite alternate;
   pointer-events: none;
+}
+.auth-page.single .auth-page-glow {
+  position: fixed !important;
 }
 @keyframes auth-drift {
   to {
     transform: translate3d(3%, -2%, 0) rotate(6deg);
   }
 }
+.auth-home {
+  position: absolute !important;
+  top: calc(var(--safe-top) + 14px);
+  left: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 14px 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-sm);
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 560;
+  text-decoration: none;
+  transition: color 0.2s, background 0.2s;
+}
+.auth-home:hover {
+  color: var(--ink);
+  background: #fff;
+}
+.auth-legal {
+  max-width: 340px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
 
-@media (max-width: 520px) {
-  .auth-overlay {
-    padding: 0;
-    place-items: end center;
+/* Brand panel (wide screens only) */
+.auth-aside {
+  display: none;
+}
+
+@media (min-width: 960px) {
+  .auth-page {
+    grid-template-columns: minmax(420px, 1.05fr) 1fr;
   }
-  .auth-card.dialog {
-    max-width: none;
-    min-height: 100%;
-    border-radius: 0;
-    padding: calc(var(--safe-top) + 44px) 20px calc(var(--safe-bottom) + 20px);
-    border: 0;
+  .auth-main {
+    padding-top: 72px;
+  }
+  .auth-aside {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 36px 48px 48px;
+    overflow: hidden;
+    color: #f4f2ee;
+    background: #14120f;
+  }
+  .auth-aside-glow {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(55% 45% at 85% 20%, rgba(242, 84, 45, 0.35), transparent 70%),
+      radial-gradient(45% 40% at 10% 90%, rgba(115, 87, 246, 0.25), transparent 70%);
+    animation: auth-drift 16s ease-in-out infinite alternate;
+  }
+  .auth-aside-logo {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: #ff8a65;
+    text-decoration: none;
+    z-index: 2;
+  }
+  .auth-aside-logo .display {
+    font-size: 28px;
+    color: #f4f2ee;
+  }
+  .auth-aside-phone {
+    position: absolute;
+    right: -36px;
+    top: 96px;
+    width: min(280px, 34vh);
+    aspect-ratio: 9 / 18;
+    border-radius: 46px;
+    padding: 10px;
+    background: linear-gradient(145deg, #2a2723, #0e0d0b);
+    box-shadow: 0 50px 90px -30px rgba(0, 0, 0, 0.8), inset 0 0 0 1.5px rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+  }
+  .auth-aside-phone > .hm {
+    inset: 10px;
+    border-radius: 36px;
+    overflow: hidden;
+  }
+  .auth-aside-copy {
+    position: relative;
+    z-index: 2;
+    max-width: min(380px, calc(100% - 200px));
+  }
+  .auth-aside-copy h2 {
+    font-size: 64px;
+    line-height: 0.98;
+    letter-spacing: -0.02em;
+  }
+  .auth-aside-copy em {
+    color: #ff8a65;
+  }
+  .auth-aside-copy ul {
+    margin-top: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .auth-aside-copy li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15px;
+    color: rgba(244, 242, 238, 0.75);
+  }
+  .auth-aside-copy li svg {
+    color: #ff8a65;
+  }
+}
+
+/* Phones: the form is the page, no floating card */
+@media (max-width: 559px) {
+  .auth-main {
+    justify-content: flex-start;
+    padding-top: calc(var(--safe-top) + 72px);
   }
   .auth-card {
-    padding: 28px 20px 20px;
+    max-width: none;
+    padding: 4px 4px 8px;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .auth-page.single .auth-card {
+    padding-top: 12px;
   }
   .auth-head h2 {
-    font-size: 30px;
+    font-size: 32px;
   }
   .strength-rules {
     grid-template-columns: 1fr;
@@ -539,7 +646,8 @@ li.ok .strength-check {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .auth-page-glow {
+  .auth-page-glow,
+  .auth-aside-glow {
     animation: none;
   }
 }

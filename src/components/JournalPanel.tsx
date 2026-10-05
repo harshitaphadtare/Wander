@@ -1,10 +1,11 @@
-import { ChevronRight, Flame, Footprints, X } from 'lucide-react'
+import { Camera, ChevronRight, Flame, Footprints, Gift, X } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useMemo } from 'react'
 import type { PlaceWithStats } from '../hooks/useData'
 import type { Visit } from '../lib/db'
 import { dayLabel, duration, startOfDay, timeOfDay } from '../lib/format'
 import { PERIOD_OPTIONS, periodStart, type Period } from '../lib/periods'
+import { weeklyStreak } from '../lib/streak'
 import { deleteVisit } from '../lib/places'
 import { CountUp, EmptyState, IconTile, Segmented, Stagger } from '../ui/bits'
 import { useConfirm } from '../ui/Confirm'
@@ -16,13 +17,15 @@ interface Props {
   places: PlaceWithStats[]
   period: Period
   onPeriod(period: Period): void
-  onPick(place: PlaceWithStats): void
   /** Show this period's visits as a heatmap on the map. */
   onHeatmap(): void
+  /** Open one visit (note, photos). */
+  onVisit(visitId: string): void
+  onWrapped(): void
   onClose(): void
 }
 
-export default function JournalPanel({ visits, places, period, onPeriod, onPick, onHeatmap, onClose }: Props) {
+export default function JournalPanel({ visits, places, period, onPeriod, onHeatmap, onVisit, onWrapped, onClose }: Props) {
   const confirm = useConfirm()
   const byId = useMemo(() => new Map(places.map((p) => [p.id, p])), [places])
 
@@ -46,6 +49,7 @@ export default function JournalPanel({ visits, places, period, onPeriod, onPick,
   }, [visits, period, byId])
 
   const uniquePlaces = new Set(inPeriod.map((v) => v.placeId)).size
+  const streak = useMemo(() => weeklyStreak(visits), [visits])
   let i = 0
 
   const remove = async (v: Visit, name: string) => {
@@ -83,6 +87,51 @@ export default function JournalPanel({ visits, places, period, onPeriod, onPick,
         </div>
       </div>
 
+      {visits.length > 0 && (
+        <motion.div className="streak-card" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+          <div className="streak-main">
+            <strong className="display num">
+              <CountUp value={streak.weeks} />
+            </strong>
+            <span className="row-text">
+              <strong>{streak.weeks === 1 ? 'week' : 'weeks'} of somewhere new</strong>
+              <small>
+                {streak.thisWeek
+                  ? 'This week’s done. Nice.'
+                  : streak.weeks
+                    ? 'Visit one new place this week to keep it going.'
+                    : 'Visit a new place this week to start a streak.'}
+                {streak.best > streak.weeks ? ` Best: ${streak.best}.` : ''}
+              </small>
+            </span>
+          </div>
+          <div className="streak-weeks" aria-label="Last 8 weeks">
+            {streak.recent.map((on, i) => (
+              <motion.span
+                key={i}
+                className={`${on ? 'on' : ''} ${i === 7 ? 'now' : ''}`}
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ delay: 0.1 + i * 0.03, type: 'spring', stiffness: 500, damping: 26 }}
+              />
+            ))}
+          </div>
+        </motion.div>
+      )}
+
+      {visits.length > 0 && (
+        <motion.button className="heat-link wrapped-link" onClick={onWrapped} whileTap={{ scale: 0.98 }}>
+          <span className="heat-link-icon" aria-hidden>
+            <Gift size={18} strokeWidth={2.3} />
+          </span>
+          <span className="row-text">
+            <strong>Wander Wrapped</strong>
+            <small>Your {period === 'year' || period === 'all' ? 'year' : 'month'} in places</small>
+          </span>
+          <ChevronRight size={18} strokeWidth={2.2} aria-hidden />
+        </motion.button>
+      )}
+
       {inPeriod.length > 0 && (
         <motion.button className="heat-link" onClick={onHeatmap} whileTap={{ scale: 0.98 }}>
           <span className="heat-link-icon" aria-hidden>
@@ -112,7 +161,7 @@ export default function JournalPanel({ visits, places, period, onPeriod, onPick,
                     <Stagger key={v.id} index={i++} className="timeline-item">
                       <span className="timeline-time">{timeOfDay(v.arrivedAt)}</span>
                       <span className="timeline-node" style={{ background: place.level.color }} />
-                      <button className="timeline-card" onClick={() => onPick(place)}>
+                      <button className="timeline-card" onClick={() => onVisit(v.id)}>
                         <IconTile icon={categoryIcon(place.category)} color={place.level.color} size={34} />
                         <span className="row-text">
                           <strong>{place.name}</strong>
@@ -120,7 +169,14 @@ export default function JournalPanel({ visits, places, period, onPeriod, onPick,
                             {v.source === 'auto' ? 'Auto-detected' : 'Checked in'}
                             {v.leftAt ? ` · ${duration(v.leftAt - v.arrivedAt)}` : ''}
                           </small>
+                          {v.note && <span className="timeline-note">“{v.note}”</span>}
                         </span>
+                        {!!v.photoIds?.length && (
+                          <span className="timeline-photos" aria-label={`${v.photoIds.length} photos`}>
+                            <Camera size={13} strokeWidth={2.4} />
+                            {v.photoIds.length}
+                          </span>
+                        )}
                       </button>
                       <button className="timeline-delete" aria-label="Delete visit" onClick={() => remove(v, place.name)}>
                         <X size={14} strokeWidth={2.4} />

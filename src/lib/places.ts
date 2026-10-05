@@ -1,6 +1,7 @@
 import { notifyLocalChange } from './changes'
-import { db, type Place, type Visit, type VisitSource, type Walk } from './db'
+import { db, type List, type Place, type Visit, type VisitSource, type Walk } from './db'
 import { distanceM, type LatLng } from './geo'
+import { removePhotosFor } from './photos'
 
 export interface PlaceInput {
   name: string
@@ -90,6 +91,8 @@ export async function renamePlace(id: string, name: string) {
 
 /** Soft-delete a place and all its visits. */
 export async function deletePlace(id: string) {
+  const visitIds = await db.visits.where('placeId').equals(id).primaryKeys()
+  await removePhotosFor(visitIds)
   await db.transaction('rw', db.places, db.visits, async () => {
     await db.places.update(id, { deleted: 1, ...stamp() })
     await db.visits.where('placeId').equals(id).modify({ deleted: 1, ...stamp() })
@@ -98,6 +101,7 @@ export async function deletePlace(id: string) {
 }
 
 export async function deleteVisit(id: string) {
+  await removePhotosFor([id])
   await db.visits.update(id, { deleted: 1, ...stamp() })
   notifyLocalChange()
 }
@@ -111,5 +115,51 @@ export async function startWalk(walk: Omit<Walk, 'id' | 'updatedAt' | 'dirty' | 
 
 export async function finishWalk(id: string, arrived: boolean) {
   await db.walks.update(id, { endedAt: Date.now(), arrived, ...stamp() })
+  notifyLocalChange()
+}
+
+export async function setVisitNote(id: string, note: string) {
+  await db.visits.update(id, { note: note.trim() || undefined, ...stamp() })
+  notifyLocalChange()
+}
+
+// ---- Lists ----
+
+export async function createList(name: string): Promise<List> {
+  const list: List = { id: crypto.randomUUID(), name: name.trim() || 'New list', createdAt: Date.now(), deleted: 0, ...stamp() }
+  await db.lists.add(list)
+  notifyLocalChange()
+  return list
+}
+
+export async function renameList(id: string, name: string) {
+  const trimmed = name.trim()
+  if (!trimmed) return
+  await db.lists.update(id, { name: trimmed, ...stamp() })
+  notifyLocalChange()
+}
+
+/** Deletes the list; places stay, they just leave it. */
+export async function deleteList(id: string) {
+  await db.transaction('rw', db.lists, db.places, async () => {
+    await db.lists.update(id, { deleted: 1, ...stamp() })
+    await db.places
+      .filter((p) => !!p.listIds?.includes(id))
+      .modify((p) => {
+        p.listIds = p.listIds!.filter((x) => x !== id)
+        p.updatedAt = Date.now()
+        p.dirty = 1
+      })
+  })
+  notifyLocalChange()
+}
+
+export async function toggleList(placeId: string, listId: string) {
+  const place = await db.places.get(placeId)
+  if (!place) return
+  const ids = new Set(place.listIds ?? [])
+  if (ids.has(listId)) ids.delete(listId)
+  else ids.add(listId)
+  await db.places.update(placeId, { listIds: [...ids], ...stamp() })
   notifyLocalChange()
 }

@@ -5,7 +5,7 @@
 create table if not exists public.records (
   id                uuid primary key,
   user_id           uuid not null default auth.uid() references auth.users (id) on delete cascade,
-  table_name        text not null check (table_name in ('places', 'visits', 'walks', 'picks')),
+  table_name        text not null check (table_name in ('places', 'visits', 'walks', 'picks', 'lists')),
   data              jsonb not null,
   updated_at        bigint not null,          -- client ms timestamp, used for last-write-wins
   deleted           boolean not null default false,
@@ -95,3 +95,10 @@ grant execute on function public.data_key() to authenticated;
 alter table public.records drop constraint if exists records_data_encrypted;
 alter table public.records add constraint records_data_encrypted
   check (data ? 'iv' and data ? 'ct' and (data ->> 'v') = '1') not valid;
+
+-- ---------------------------------------------------------------------------
+-- Lists (added Oct 2026): allow the new synced table. Safe to re-run.
+-- ---------------------------------------------------------------------------
+alter table public.records drop constraint if exists records_table_name_check;
+alter table public.records add constraint records_table_name_check
+  check (table_name in ('places', 'visits', 'walks', 'picks', 'lists'));

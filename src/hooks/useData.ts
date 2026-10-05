@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useMemo } from 'react'
-import { db, type Place, type Visit } from '../lib/db'
+import { useEffect, useMemo } from 'react'
+import { db, type List, type Photo, type Place, type Visit, type Walk } from '../lib/db'
 import { levelFor, type Level } from '../lib/levels'
 
 export interface PlaceWithStats extends Place {
@@ -44,4 +44,23 @@ export function useVisits(): Visit[] | undefined {
         .toArray(),
     [],
   )
+}
+
+export function useLists(): List[] | undefined {
+  return useLiveQuery(() => db.lists.where('deleted').equals(0).sortBy('createdAt'), [])
+}
+
+export function useWalks(): Walk[] | undefined {
+  return useLiveQuery(() => db.walks.where('deleted').equals(0).toArray(), [])
+}
+
+/** This visit's photos as object URLs, revoked when they change or unmount. */
+export function usePhotoUrls(visitId: string | undefined): { photo: Photo; url: string }[] {
+  const photos = useLiveQuery(
+    () => (visitId ? db.photos.where('visitId').equals(visitId).sortBy('createdAt') : Promise.resolve([] as Photo[])),
+    [visitId],
+  )
+  const urls = useMemo(() => (photos ?? []).map((photo) => ({ photo, url: URL.createObjectURL(photo.blob) })), [photos])
+  useEffect(() => () => urls.forEach((u) => URL.revokeObjectURL(u.url)), [urls])
+  return urls
 }

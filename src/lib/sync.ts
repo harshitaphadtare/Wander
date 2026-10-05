@@ -82,6 +82,8 @@ async function push(userId: string, key: CryptoKey) {
         })),
       )
       const { error } = await supabase!.from('records').upsert(rows)
+      // 23514 = check violation: the server's schema predates this table.
+      if (error?.code === '23514') throw new Error('The server needs an update. Re-run supabase/schema.sql in Supabase.')
       if (error) throw error
       // Clear the flag only if the row wasn't edited again while we were pushing.
       await db.transaction('rw', t, async () => {

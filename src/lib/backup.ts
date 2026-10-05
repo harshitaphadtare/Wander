@@ -10,10 +10,11 @@ interface BackupFile {
   visits: unknown[]
   walks: unknown[]
   picks: unknown[]
+  lists?: unknown[]
 }
 
 export async function exportBackup(): Promise<{ file: File; counts: { places: number; visits: number } }> {
-  const [places, visits, walks, picks] = await Promise.all(
+  const [places, visits, walks, picks, lists] = await Promise.all(
     SYNCED_TABLES.map((t) => db.table(t).toArray().then((rows) => rows.map(withoutDirty))),
   )
   const backup: BackupFile = {
@@ -24,6 +25,7 @@ export async function exportBackup(): Promise<{ file: File; counts: { places: nu
     visits,
     walks,
     picks,
+    lists,
   }
   const date = new Date().toLocaleDateString('en-CA') // local YYYY-MM-DD
   const file = new File([JSON.stringify(backup, null, 2)], `wander-backup-${date}.json`, {

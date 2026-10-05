@@ -1,5 +1,6 @@
 import type { Session } from '@supabase/supabase-js'
 import { useSyncExternalStore } from 'react'
+import { navigate } from './router'
 import { supabase } from './supabase'
 
 /**
@@ -14,29 +15,24 @@ import { supabase } from './supabase'
 
 export const authEnabled = !!supabase
 
-const GUEST_KEY = 'wander:guest'
-
 export interface AuthState {
   ready: boolean
   session: Session | null
   /** Set while the user arrived from a password-reset email. */
   recovering: boolean
-  guest: boolean
 }
 
-function readGuest() {
-  try {
-    return localStorage.getItem(GUEST_KEY) === '1'
-  } catch {
-    return false
-  }
+// Wander needs an account now; clear the old "use without an account" flag.
+try {
+  localStorage.removeItem('wander:guest')
+} catch {
+  /* private mode */
 }
 
 let state: AuthState = {
   ready: !supabase,
   session: null,
-  recovering: /type=recovery/.test(location.hash),
-  guest: readGuest(),
+  recovering: /type=recovery/.test(location.hash) || location.pathname.startsWith('/reset-password'),
 }
 const listeners = new Set<() => void>()
 function set(patch: Partial<AuthState>) {
@@ -62,22 +58,13 @@ export function useAuth() {
   return useSyncExternalStore(authStore.subscribe, authStore.get)
 }
 
-export function continueAsGuest(on = true) {
-  try {
-    if (on) localStorage.setItem(GUEST_KEY, '1')
-    else localStorage.removeItem(GUEST_KEY)
-  } catch {
-    /* private mode: guest lasts for this visit only */
-  }
-  set({ guest: on })
-}
-
 function client() {
   if (!supabase) throw new Error('Accounts aren’t set up for this copy of Wander.')
   return supabase
 }
 
-const redirectTo = () => `${location.origin}/`
+/** Where Google and the confirmation email send you back to. */
+const appUrl = () => `${location.origin}/app`
 
 /** Turn Supabase's error strings into something a person can act on. */
 function friendly(err: { message: string; status?: number; code?: string }): Error {
@@ -99,7 +86,7 @@ export async function signIn(email: string, password: string) {
 
 /** Resolves to 'confirm' when Supabase wants the email confirmed before the first sign-in. */
 export async function signUp(email: string, password: string): Promise<'signed-in' | 'confirm'> {
-  const { data, error } = await client().auth.signUp({ email, password, options: { emailRedirectTo: redirectTo() } })
+  const { data, error } = await client().auth.signUp({ email, password, options: { emailRedirectTo: appUrl() } })
   if (error) throw friendly(error)
   // With "Confirm email" on, Supabase hides whether the address already exists by
   // returning a user with no identities instead of an error.
@@ -108,20 +95,20 @@ export async function signUp(email: string, password: string): Promise<'signed-i
 }
 
 export async function resendConfirmation(email: string) {
-  const { error } = await client().auth.resend({ type: 'signup', email, options: { emailRedirectTo: redirectTo() } })
+  const { error } = await client().auth.resend({ type: 'signup', email, options: { emailRedirectTo: appUrl() } })
   if (error) throw friendly(error)
 }
 
 export async function signInWithGoogle() {
   const { error } = await client().auth.signInWithOAuth({
     provider: 'google',
-    options: { redirectTo: redirectTo(), queryParams: { prompt: 'select_account' } },
+    options: { redirectTo: appUrl(), queryParams: { prompt: 'select_account' } },
   })
   if (error) throw friendly(error)
 }
 
 export async function sendPasswordReset(email: string) {
-  const { error } = await client().auth.resetPasswordForEmail(email, { redirectTo: redirectTo() })
+  const { error } = await client().auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}/reset-password` })
   if (error) throw friendly(error)
 }
 
@@ -133,16 +120,14 @@ export async function updatePassword(password: string) {
 
 export function finishRecovery() {
   set({ recovering: false })
+  navigate('/app', { replace: true })
 }
 
-export const AUTH_EVENT = 'wander:auth'
-
-/** Fire from anywhere (e.g. Settings) to open the sign-in dialog over the app; Root listens. */
 export function openAuth(view: 'signin' | 'signup' = 'signin') {
-  window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: view }))
+  navigate(view === 'signup' ? '/signup' : '/login')
 }
 
 export async function signOut() {
   await supabase?.auth.signOut()
-  continueAsGuest(false)
+  navigate('/login', { replace: true })
 }

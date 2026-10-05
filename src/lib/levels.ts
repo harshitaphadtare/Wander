@@ -11,7 +11,7 @@ export interface Level {
 
 // Ordered lowest → highest. Icons live in ui/icons.tsx.
 export const LEVELS: Level[] = [
-  { key: 'saved', label: 'Saved', color: '#8C877E', min: 0 },
+  { key: 'saved', label: 'Want to go', color: '#8C877E', min: 0 },
   { key: 'visited', label: 'Visited', color: '#12A187', min: 1 },
   { key: 'favourite', label: 'Favourite', color: '#F29D0C', min: 2 },
   { key: 'regular', label: 'Regular', color: '#E8457A', min: 5 },

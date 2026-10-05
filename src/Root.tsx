@@ -1,65 +1,112 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
-import AuthDialog from './auth/AuthDialog'
-import type { AuthView } from './auth/AuthPanel'
-import { AUTH_EVENT, continueAsGuest, useAuth } from './lib/auth'
+import { lazy, Suspense, useEffect } from 'react'
+import { useAuth } from './lib/auth'
+import { navigate, useRoute } from './lib/router'
 
 // Split so the landing page doesn't wait for the map, and vice versa.
 const App = lazy(() => import('./App'))
 const Landing = lazy(() => import('./landing/Landing'))
+const AuthPage = lazy(() => import('./auth/AuthPage'))
 const ResetPassword = lazy(() => import('./auth/ResetPassword'))
 
 const isStandalone =
   matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true
 
 /**
- * Decides what to show: the reset-password screen when arriving from that
- * email, the app when signed in or using Wander without an account, and the
- * landing page otherwise. The installed iPhone app skips the marketing page
- * and opens straight to sign-in.
+ * iOS home-screen apps with a translucent status bar sometimes report a
+ * viewport one status-bar shorter than the screen, so `100dvh` / `inset: 0`
+ * stop short and leave a strip of background at the bottom. In the installed
+ * app the page always fills the screen, so size to the screen itself.
+ */
+function fitStandaloneViewport() {
+  if (!isStandalone || !/iPhone|iPad|iPod/.test(navigator.userAgent)) return
+  const apply = () => {
+    const landscape = matchMedia('(orientation: landscape)').matches
+    const full = landscape ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height)
+    // Never shrink below what the browser reports (e.g. once Apple fixes it).
+    document.documentElement.style.setProperty('--app-h', `${Math.max(full, window.innerHeight)}px`)
+  }
+  apply()
+  window.addEventListener('resize', apply)
+  window.addEventListener('orientationchange', () => setTimeout(apply, 300))
+}
+fitStandaloneViewport()
+
+/**
+ * Full-screen containers must never scroll. Browsers still scroll an
+ * overflow:hidden box to reveal a focused element, and iOS scrolls the page up
+ * for the keyboard and often doesn't scroll it back, which left a gap at the bottom.
+ */
+function keepFullScreenPinned() {
+  const pinned = (el: EventTarget | null): el is HTMLElement =>
+    el instanceof HTMLElement && (el.classList.contains('app') || el.classList.contains('root-screen') || el.id === 'root')
+  // Scroll events don't bubble, but a capturing listener on document still sees them.
+  document.addEventListener(
+    'scroll',
+    (e) => {
+      if (pinned(e.target) && (e.target.scrollTop || e.target.scrollLeft)) e.target.scrollTo(0, 0)
+    },
+    true,
+  )
+  const editing = () => {
+    const a = document.activeElement
+    return a instanceof HTMLInputElement || a instanceof HTMLTextAreaElement || (a instanceof HTMLElement && a.isContentEditable)
+  }
+  const reset = () => {
+    if (!editing() && (window.scrollY || document.documentElement.scrollTop)) window.scrollTo(0, 0)
+  }
+  document.addEventListener('focusout', () => setTimeout(reset, 80))
+  window.visualViewport?.addEventListener('resize', () => setTimeout(reset, 80))
+}
+keepFullScreenPinned()
+
+/**
+ * Routes:
+ *   /                landing page (the installed app skips it)
+ *   /login /signup   sign in or create an account
+ *   /reset-password  choose a new password (from the reset email)
+ *   /app             the map; needs an account
  */
 export default function Root() {
   const auth = useAuth()
-  const [dialog, setDialog] = useState<AuthView | null>(null)
-  const close = useCallback(() => setDialog(null), [])
+  const route = useRoute()
 
+  // Redirects, once we know whether you're signed in.
   useEffect(() => {
-    const onOpen = (e: Event) => setDialog((e as CustomEvent<AuthView>).detail)
-    window.addEventListener(AUTH_EVENT, onOpen)
-    return () => window.removeEventListener(AUTH_EVENT, onOpen)
-  }, [])
+    if (!auth.ready) return
+    if (auth.recovering) {
+      if (route !== '/reset-password') navigate('/reset-password', { replace: true })
+      return
+    }
+    const signedIn = !!auth.session
+    if (route === '/app' && !signedIn) navigate('/login', { replace: true })
+    else if ((route === '/login' || route === '/signup') && signedIn) navigate('/app', { replace: true })
+    else if (route === '/reset-password' && !signedIn) navigate('/login', { replace: true })
+    else if (route === '/' && isStandalone) navigate(signedIn ? '/app' : '/login', { replace: true })
+  }, [auth.ready, auth.session, auth.recovering, route])
 
-  // Signing in from the dialog closes it.
-  useEffect(() => {
-    if (auth.session) setDialog(null)
-  }, [auth.session])
-
-  const screen = !auth.ready ? 'boot' : auth.recovering ? 'reset' : auth.session || auth.guest ? 'app' : 'landing'
-  const guest = () => {
-    continueAsGuest(true)
-    setDialog(null)
-  }
+  const screen = !auth.ready ? 'boot' : route
 
   return (
-    <>
-      {/* Crossfade (not mode="wait") so the next screen never waits on an exit animation. */}
-      <AnimatePresence initial={false}>
-        <motion.div
-          key={screen}
-          className="root-screen"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0, pointerEvents: 'none' }}
-          transition={{ duration: 0.3 }}
-        >
-          <Suspense fallback={null}>
-            {screen === 'app' && <App />}
-            {screen === 'reset' && <ResetPassword />}
-            {screen === 'landing' && <Landing standalone={isStandalone} onAuth={setDialog} onGuest={guest} />}
-          </Suspense>
-        </motion.div>
-      </AnimatePresence>
-      <AuthDialog open={!!dialog && screen !== 'reset'} view={dialog ?? 'signin'} onClose={close} onGuest={screen === 'landing' ? guest : undefined} />
-    </>
+    /* Crossfade (not mode="wait") so the next screen never waits on an exit animation. */
+    <AnimatePresence initial={false}>
+      <motion.div
+        key={screen === '/signup' ? '/login' : screen}
+        className="root-screen"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0, pointerEvents: 'none' }}
+        transition={{ duration: 0.3 }}
+      >
+        <Suspense fallback={null}>
+          {screen === '/' && <Landing signedIn={!!auth.session} />}
+          {(screen === '/login' || screen === '/signup') && (
+            <AuthPage view={screen === '/signup' ? 'signup' : 'signin'} standalone={isStandalone} />
+          )}
+          {screen === '/reset-password' && auth.session && <ResetPassword />}
+          {screen === '/app' && auth.session && <App />}
+        </Suspense>
+      </motion.div>
+    </AnimatePresence>
   )
 }

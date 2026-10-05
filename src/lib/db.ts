@@ -25,6 +25,8 @@ export interface Place extends SyncFields {
   category?: string
   address?: string
   createdAt: number
+  /** Your own lists this place belongs to ("Rainy day", "Work cafes"…). */
+  listIds?: string[]
 }
 
 export type VisitSource = 'check-in' | 'auto'
@@ -34,6 +36,25 @@ export interface Visit extends SyncFields {
   arrivedAt: number
   leftAt?: number
   source: VisitSource
+  /** "Got the pistachio croissant". Syncs. */
+  note?: string
+  /** Photos stay on this device (see `photos`); ids are kept so the journal knows to look. */
+  photoIds?: string[]
+}
+
+export interface List extends SyncFields {
+  name: string
+  createdAt: number
+}
+
+/** A visit photo, resized on the device. Never synced or backed up to the cloud. */
+export interface Photo {
+  id: string
+  visitId: string
+  blob: Blob
+  width: number
+  height: number
+  createdAt: number
 }
 
 // Tables for later phases (walk planner, AI picks); defined now so the schema is stable.
@@ -46,13 +67,33 @@ export interface Walk extends SyncFields {
   startedAt: number
   endedAt?: number
   arrived?: boolean
+  /** the planned route, simplified ([lng, lat]); clears the fog along the way */
+  path?: [number, number][]
 }
 
+export interface PickItem {
+  name: string
+  lat: number
+  lng: number
+  category?: string
+  osmId?: string
+  reason: string
+  /** e.g. "7 km away" */
+  meta?: string
+}
+
+/** "Explore next" suggestions, kept for the week / month / year they were made for. */
 export interface Pick extends SyncFields {
   period: 'week' | 'month' | 'year'
+  /** which week / month / year, e.g. "2026-W41", "2026-10", "2026" */
+  key?: string
+  items?: PickItem[]
+  /** saved places among the picks (from the original data model) */
   placeIds: string[]
   reasons: string[]
   createdAt: number
+  /** whether Gemini wrote the reasons */
+  ai?: boolean
 }
 
 export interface Meta {
@@ -65,6 +106,8 @@ export const db = new Dexie('wander') as Dexie & {
   visits: EntityTable<Visit, 'id'>
   walks: EntityTable<Walk, 'id'>
   picks: EntityTable<Pick, 'id'>
+  lists: EntityTable<List, 'id'>
+  photos: EntityTable<Photo, 'id'>
   meta: EntityTable<Meta, 'key'>
 }
 
@@ -76,6 +119,12 @@ db.version(1).stores({
   meta: 'key',
 })
 
+// v2: lists, and on-device visit photos.
+db.version(2).stores({
+  lists: 'id, createdAt, updatedAt, dirty, deleted',
+  photos: 'id, visitId, createdAt',
+})
+
 /** A row as stored in the cloud / backups: everything but the local-only dirty flag. */
 export function withoutDirty<T extends object>(row: T): Omit<T, 'dirty'> {
   const copy = { ...row } as T & { dirty?: unknown }
@@ -83,7 +132,7 @@ export function withoutDirty<T extends object>(row: T): Omit<T, 'dirty'> {
   return copy
 }
 
-export const SYNCED_TABLES = ['places', 'visits', 'walks', 'picks'] as const
+export const SYNCED_TABLES = ['places', 'visits', 'walks', 'picks', 'lists'] as const
 export type SyncedTable = (typeof SYNCED_TABLES)[number]
 
 export async function getMeta<T>(key: string, fallback: T): Promise<T> {

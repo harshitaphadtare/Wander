@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 're
 import { authEnabled, resendConfirmation, sendPasswordReset, signIn, signInWithGoogle, signUp } from '../lib/auth'
 import { strength as rate } from '../lib/password'
 import { Segmented } from '../ui/bits'
-import { LogoMark } from '../ui/Logo'
+import { navigate } from '../lib/router'
+import { AppIcon } from '../ui/Logo'
 import { Field, GoogleIcon, Spinner, StrengthMeter, useBreachCheck } from './fields'
 
 export type AuthView = 'signin' | 'signup' | 'forgot' | 'reset-sent' | 'confirm-sent'
@@ -38,7 +39,7 @@ function useCooldown() {
   }
 }
 
-export default function AuthPanel({ initial = 'signin', onGuest }: { initial?: AuthView; onGuest?: () => void }) {
+export default function AuthPanel({ initial = 'signin' }: { initial?: AuthView }) {
   const [view, setView] = useState<AuthView>(initial)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -58,7 +59,11 @@ export default function AuthPanel({ initial = 'signin', onGuest }: { initial?: A
   const go = (next: AuthView) => {
     setError('')
     setTouched(false)
-    if (next === 'signin' || next === 'signup') setConfirm('')
+    if (next === 'signin' || next === 'signup') {
+      setConfirm('')
+      // Keep the address bar in step: /login ↔ /signup.
+      navigate(next === 'signup' ? '/signup' : '/login', { replace: true })
+    }
     setView(next)
   }
 
@@ -115,7 +120,7 @@ export default function AuthPanel({ initial = 'signin', onGuest }: { initial?: A
     <motion.div className="auth" animate={shake}>
       <div className="auth-brand">
         <span className="auth-logo" aria-hidden>
-          <LogoMark />
+          <AppIcon size={56} />
         </span>
       </div>
 
@@ -133,7 +138,7 @@ export default function AuthPanel({ initial = 'signin', onGuest }: { initial?: A
           </header>
 
           {!authEnabled ? (
-            <NotConfigured onGuest={onGuest} />
+            <NotConfigured />
           ) : sent ? (
             <SentState
               email={email.trim()}
@@ -271,11 +276,6 @@ export default function AuthPanel({ initial = 'signin', onGuest }: { initial?: A
           <ShieldCheck size={14} />
           Synced data is encrypted on your device with AES-256 before it’s uploaded.
         </p>
-        {onGuest && (
-          <button type="button" className="auth-guest" onClick={onGuest}>
-            Continue without an account
-          </button>
-        )}
       </footer>
     </motion.div>
   )
@@ -323,20 +323,13 @@ function SentState({
   )
 }
 
-function NotConfigured({ onGuest }: { onGuest?: () => void }): ReactNode {
+function NotConfigured(): ReactNode {
   return (
     <div className="auth-sent">
       <p>
-        Accounts need a Supabase project, which this copy of Wander doesn’t have yet (see <code>docs/SETUP.md</code>). You can still use
-        everything on this device.
+        Sign-in isn’t set up for this copy of Wander yet. Add your Supabase project’s URL and key (see <code>docs/SETUP.md</code>), then
+        reload.
       </p>
-      {onGuest && (
-        <button type="button" className="auth-submit" onClick={onGuest}>
-          Open Wander <ArrowRight size={17} />
-        </button>
-      )}
     </div>
   )
 }
-
-

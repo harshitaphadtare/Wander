@@ -3,7 +3,7 @@ import { Bookmark, Check, Footprints, MapPinPlus, Pencil, Tag, Trash } from 'luc
 import { motion } from 'motion/react'
 import { useState } from 'react'
 import type { PlaceWithStats } from '../hooks/useData'
-import { db } from '../lib/db'
+import { db, type List } from '../lib/db'
 import { plural, relativeTime, timeOfDay } from '../lib/format'
 import { distanceM, formatDistance, type LatLng } from '../lib/geo'
 import { nextLevel } from '../lib/levels'
@@ -13,6 +13,7 @@ import { CountUp, IconTile, ProgressRing } from '../ui/bits'
 import { useConfirm } from '../ui/Confirm'
 import { categoryIcon, LEVEL_ICONS } from '../ui/icons'
 import Sheet from '../ui/Sheet'
+import ListChips from './ListChips'
 
 function EatClubNote({ category }: { category?: string }) {
   if (!isFoodPlace(category)) return null
@@ -33,14 +34,16 @@ function metaLine(category: string | undefined, from: LatLng | null, at: LatLng)
 interface SavedProps {
   place: PlaceWithStats
   from: LatLng | null
+  lists: List[]
   busy: boolean
+  onVisit(visitId: string): void
   onCheckIn(): void
   onWalk(): void
   onClose(): void
   onDeleted(): void
 }
 
-export function SavedPlaceSheet({ place, from, busy, onCheckIn, onWalk, onClose, onDeleted }: SavedProps) {
+export function SavedPlaceSheet({ place, from, lists, busy, onVisit, onCheckIn, onWalk, onClose, onDeleted }: SavedProps) {
   const confirm = useConfirm()
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(place.name)
@@ -81,7 +84,7 @@ export function SavedPlaceSheet({ place, from, busy, onCheckIn, onWalk, onClose,
     <Sheet
       onClose={onClose}
       leading={<IconTile icon={categoryIcon(place.category)} color={place.level.color} size={48} />}
-      eyebrow={metaLine(place.category, from, place) || 'Saved place'}
+      eyebrow={[place.visitCount === 0 ? 'Want to go' : null, metaLine(place.category, from, place)].filter(Boolean).join(' · ') || 'Saved place'}
       title={
         editing ? (
           <form
@@ -158,6 +161,8 @@ export function SavedPlaceSheet({ place, from, busy, onCheckIn, onWalk, onClose,
 
       <EatClubNote category={place.category} />
 
+      <ListChips placeId={place.id} listIds={place.listIds ?? []} lists={lists} />
+
       {recent && recent.length > 0 && (
         <section>
           <div className="list-label">Recent visits</div>
@@ -169,11 +174,13 @@ export function SavedPlaceSheet({ place, from, busy, onCheckIn, onWalk, onClose,
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.05 * i + 0.1 }}
               >
-                <span className="mini-dot" />
-                <span className="mini-when">{relativeTime(v.arrivedAt)}</span>
-                <span className="mini-meta">
-                  {timeOfDay(v.arrivedAt)} · {v.source === 'auto' ? 'Auto' : 'Check-in'}
-                </span>
+                <button className="mini-row" onClick={() => onVisit(v.id)}>
+                  <span className="mini-dot" />
+                  <span className="mini-when">{relativeTime(v.arrivedAt)}</span>
+                  <span className="mini-meta">
+                    {v.note ? `“${v.note}”` : `${timeOfDay(v.arrivedAt)} · ${v.source === 'auto' ? 'Auto' : 'Check-in'}`}
+                  </span>
+                </button>
               </motion.li>
             ))}
           </ul>
@@ -203,7 +210,7 @@ export function ResultSheet({ result, from, busy, onCheckIn, onSave, onWalk, onC
       subtitle={result.address}
       footer={
         <div className="btn-row">
-          <motion.button className="btn square" onClick={onSave} disabled={busy} whileTap={{ scale: 0.94 }} aria-label="Save place">
+          <motion.button className="btn square" onClick={onSave} disabled={busy} whileTap={{ scale: 0.94 }} aria-label="Save to wishlist">
             <Bookmark size={18} strokeWidth={2.3} />
           </motion.button>
           <motion.button className="btn grow" onClick={onWalk} disabled={busy} whileTap={{ scale: 0.97 }}>
@@ -215,7 +222,7 @@ export function ResultSheet({ result, from, busy, onCheckIn, onSave, onWalk, onC
         </div>
       }
     >
-      <p className="body-muted">Not in your places yet. Save it for later, or check in when you're here.</p>
+      <p className="body-muted">Not in your places yet. Bookmark it for your wishlist, or check in when you're here.</p>
       <EatClubNote category={result.category} />
     </Sheet>
   )

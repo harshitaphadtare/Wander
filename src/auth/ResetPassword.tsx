@@ -4,7 +4,7 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { finishRecovery, updatePassword, useAuth } from '../lib/auth'
 import { strength as rate } from '../lib/password'
 import './auth.css'
-import { LogoMark } from '../ui/Logo'
+import { AppIcon } from '../ui/Logo'
 import { Field, Spinner, StrengthMeter, useBreachCheck } from './fields'
 
 const ease = [0.16, 1, 0.3, 1] as const
@@ -46,7 +46,7 @@ export default function ResetPassword() {
   }
 
   return (
-    <div className="auth-page">
+    <div className="auth-page single">
       <div className="auth-page-glow" aria-hidden />
       <motion.div
         className="auth-card"
@@ -57,7 +57,7 @@ export default function ResetPassword() {
         <motion.div className="auth" animate={shake}>
           <div className="auth-brand">
             <span className="auth-logo">
-              <LogoMark />
+              <AppIcon size={56} />
             </span>
           </div>
           <AnimatePresence mode="wait">

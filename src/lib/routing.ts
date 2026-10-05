@@ -73,3 +73,43 @@ async function viaOsrm(points: LatLng[], signal?: AbortSignal): Promise<Route> {
   if (data.code !== 'Ok' || !r) throw new RoutingError("Couldn't find a walking route there.")
   return { coords: r.geometry.coordinates, distanceM: r.distance, durationS: r.duration }
 }
+
+/** A point `m` metres from `at` on compass bearing `deg`. */
+function offset(at: LatLng, m: number, deg: number): LatLng {
+  const rad = (deg * Math.PI) / 180
+  const dLat = (m * Math.cos(rad)) / 111_320
+  const dLng = (m * Math.sin(rad)) / (111_320 * Math.cos((at.lat * Math.PI) / 180))
+  return { lat: at.lat + dLat, lng: at.lng + dLng }
+}
+
+/**
+ * A loop walk of roughly `lengthM` that starts and ends at `start`. `seed`
+ * changes the direction, so "Shuffle" gives a different loop.
+ *
+ * With the Worker this is an openrouteservice round trip. Without it we route
+ * through two waypoints that make a triangle; streets add ~30% over straight
+ * lines, so the sides are shrunk to match.
+ */
+export async function loopRoute(start: LatLng, lengthM: number, seed: number, signal?: AbortSignal): Promise<Route> {
+  if (API_URL) {
+    try {
+      const res = await fetch(`${API_URL}/loop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start: [start.lng, start.lat], length: Math.round(lengthM), seed }),
+        signal,
+      })
+      if (res.ok) {
+        const data = (await res.json()) as { coordinates: [number, number][]; distance: number; duration: number }
+        return { coords: data.coordinates, distanceM: data.distance, durationS: data.duration }
+      }
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') throw err
+    }
+  }
+  const side = lengthM / 3 / 1.3
+  const bearing = (seed * 137.5) % 360 // golden angle: successive seeds spread evenly
+  const a = offset(start, side, bearing)
+  const b = offset(start, side, bearing + 60)
+  return walkingRoute([start, a, b, start], signal)
+}

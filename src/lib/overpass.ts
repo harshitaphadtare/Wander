@@ -24,7 +24,7 @@ export interface OsmPoi {
   address?: string
 }
 
-interface OverpassElement {
+export interface OverpassElement {
   type: 'node' | 'way' | 'relation'
   id: number
   lat?: number
@@ -59,13 +59,22 @@ export async function foodNearLine(coords: [number, number][], radiusM = 150, si
 );
 out center tags 300;`
 
-  // Race the mirrors; the first good answer wins and the others are cancelled.
+  const pois = (await overpass(query, signal)).flatMap(toPoi)
+  cache.set(around, pois)
+  return pois
+}
+
+/**
+ * Run an Overpass QL query. Races the mirrors; the first good answer wins and
+ * the others are cancelled.
+ */
+export async function overpass(query: string, signal?: AbortSignal, timeoutMs = TIMEOUT_MS): Promise<OverpassElement[]> {
   const ctrl = new AbortController()
   const onAbort = () => ctrl.abort()
   signal?.addEventListener('abort', onAbort)
-  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS)
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
-    const pois = await Promise.any(
+    return await Promise.any(
       ENDPOINTS.map(async (endpoint) => {
         const res = await fetch(endpoint, {
           method: 'POST',
@@ -75,12 +84,13 @@ out center tags 300;`
         })
         // Busy servers answer with HTML error pages; treat anything non-JSON as a miss.
         if (!res.ok || !res.headers.get('content-type')?.includes('json')) throw new Error(`Overpass ${res.status}`)
-        const data = (await res.json()) as { elements: OverpassElement[] }
-        return data.elements.flatMap(toPoi)
+        const data = (await res.json()) as { elements: OverpassElement[]; remark?: string }
+        // A server that ran out of time still answers 200, with a "runtime error" remark
+        // and partial (often empty) results. Count that as a miss so another mirror wins.
+        if (data.remark && /error|timed? ?out/i.test(data.remark)) throw new Error('Overpass timed out')
+        return data.elements
       }),
     )
-    cache.set(around, pois)
-    return pois
   } catch (err) {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     throw err instanceof AggregateError ? new Error('All Overpass servers are busy') : err

@@ -23,7 +23,8 @@ export default defineConfig({
         background_color: '#f4f2ee',
         display: 'standalone',
         orientation: 'portrait',
-        start_url: '/',
+        // The installed app opens on the map (or sign-in), never the marketing page.
+        start_url: '/app',
         scope: '/',
         icons: [
           { src: 'pwa-64x64.png', sizes: '64x64', type: 'image/png' },

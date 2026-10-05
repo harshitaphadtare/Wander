@@ -4,16 +4,18 @@ import { plural } from '../lib/format'
 import type { HeatSummary } from '../lib/heat'
 import { PERIOD_OPTIONS, type Period } from '../lib/periods'
 import { Segmented } from '../ui/bits'
+import type { MapMode } from './FogBar'
 
 interface Props {
   period: Period
   summary: HeatSummary
   onPeriod(period: Period): void
+  onMode(mode: MapMode): void
   onClose(): void
 }
 
 /** Floating controls for heat mode: period, what you're looking at, and a way out. */
-export default function HeatBar({ period, summary, onPeriod, onClose }: Props) {
+export default function HeatBar({ period, summary, onPeriod, onMode, onClose }: Props) {
   const empty = summary.visits === 0
   return (
     <motion.div
@@ -48,6 +50,15 @@ export default function HeatBar({ period, summary, onPeriod, onClose }: Props) {
         </button>
       </div>
 
+      <Segmented<MapMode>
+        id="map-mode"
+        value="heat"
+        onChange={onMode}
+        options={[
+          ['heat', 'Heatmap'],
+          ['fog', 'Explored'],
+        ]}
+      />
       <Segmented<Period> id="heat-period" value={period} onChange={onPeriod} options={PERIOD_OPTIONS} />
 
       {!empty && (

@@ -81,8 +81,8 @@ get the sign-in screen (Google, or email + password with reset) and encrypted ph
 1. Sign up at https://supabase.com with GitHub (no card).
 2. **New project**: any name, set a database password (save it somewhere), region **Sydney**.
 3. **SQL Editor → New query**: paste all of [`supabase/schema.sql`](../supabase/schema.sql) and click **Run**.
-   It's safe to re-run. **If you set sync up before October 2026, run it again now**: it adds the
-   encryption key function, and sync shows an error until you do.
+   It's safe to re-run. **If you set sync up earlier, run it again now**: it adds the encryption
+   key function and the new `lists` table, and sync shows an error until you do.
 4. **Project Settings → API Keys**: copy the **Project URL** and the **publishable** key
    (starts with `sb_publishable_`; the legacy `anon` key also works). Both are safe to put in
    front-end code, because row-level security stops anyone reading your rows.
@@ -185,6 +185,24 @@ your key never appears in the app's code.
    show `{"ok":true,"ors":true}`.
 6. **Point the app at it:** add `VITE_API_URL=https://wander-api.<you>.workers.dev` to
    `.env.local` *and* to Vercel → Settings → Environment Variables, then redeploy.
+
+### AI picks and Wander Wrapped (optional, Gemini)
+
+Explore, the "Explore next" picks and Wrapped all work without AI: Wander ranks real
+OpenStreetMap places itself and writes plain reasons. With a Gemini key, the AI re-ranks
+those same real places and writes the reasons and the Wrapped recap. It can't add places.
+
+1. Get a free key at https://aistudio.google.com/apikey (Google account, no card).
+2. Store it on the Worker (it never goes in the app):
+   ```bash
+   cd worker
+   npx wrangler secret put GEMINI_API_KEY
+   npm run deploy
+   ```
+3. `/health` on your Worker should now show `"ai":true`.
+
+On the free tier Google may use what's sent to improve its models. Wander only sends place
+names, kinds of place, rough distances and visit counts: never coordinates or your GPS trail.
 
 **Running the Worker locally (optional):** copy `worker/.dev.vars.example` to `worker/.dev.vars`,
 put your key in it, run `npm run dev` inside `worker/`, and set `VITE_API_URL=http://localhost:8787`.

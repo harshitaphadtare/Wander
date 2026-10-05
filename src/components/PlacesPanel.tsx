@@ -1,5 +1,5 @@
 import { ArrowUpDown, Check, ChevronRight, Compass, ListPlus, Pencil, Trash } from 'lucide-react'
-import { motion } from 'motion/react'
+import { AnimatePresence, motion } from 'motion/react'
 import { useMemo, useState } from 'react'
 import type { PlaceWithStats } from '../hooks/useData'
 import type { List } from '../lib/db'
@@ -59,7 +59,6 @@ export default function PlacesPanel({ places, lists, from, onPick, onClose }: Pr
       title="Your places"
     >
       {places.length > 0 && (
-      <div className="toolbar">
         <Segmented<Filter>
           id="places-filter"
           value={filter}
@@ -70,34 +69,39 @@ export default function PlacesPanel({ places, lists, from, onPick, onClose }: Pr
             ['unvisited', 'Want to go'],
           ]}
         />
-        <button className="sort-btn" onClick={cycleSort} aria-label={`Sort: ${SORT_LABEL[sort]}`}>
-          <ArrowUpDown size={14} strokeWidth={2.4} />
-          {SORT_LABEL[sort]}
-        </button>
-      </div>
       )}
 
       {places.length > 0 && (
-        <div className="chips scroll list-filter">
-          <button className={`chip ${!activeList ? 'is-on solid' : ''}`} onClick={() => setListId(null)}>
-            All places
-          </button>
-          {lists.map((l) => (
-            <button key={l.id} className={`chip ${l.id === listId ? 'is-on solid' : ''}`} onClick={() => setListId(l.id === listId ? null : l.id)}>
-              {l.name}
-              <em>{places.filter((p) => p.listIds?.includes(l.id)).length}</em>
+        <div className="places-bar">
+          <div className="chips scroll list-filter">
+            <button className={`chip ${!activeList ? 'is-on solid' : ''}`} onClick={() => setListId(null)}>
+              All places
             </button>
-          ))}
-          <button
-            className="chip ghost"
-            onClick={async () => {
-              const list = await createList(`List ${lists.length + 1}`)
-              setListId(list.id)
-              setRenaming(list.name)
-            }}
-          >
-            <ListPlus size={14} strokeWidth={2.4} /> New list
-          </button>
+            {lists.map((l) => (
+              <button key={l.id} className={`chip ${l.id === listId ? 'is-on solid' : ''}`} onClick={() => setListId(l.id === listId ? null : l.id)}>
+                {l.name}
+                <em>{places.filter((p) => p.listIds?.includes(l.id)).length}</em>
+              </button>
+            ))}
+            <button
+              className="chip ghost"
+              onClick={async () => {
+                const list = await createList(`List ${lists.length + 1}`)
+                setListId(list.id)
+                setRenaming(list.name)
+              }}
+            >
+              <ListPlus size={14} strokeWidth={2.4} /> New list
+            </button>
+          </div>
+          <motion.button className="sort-pill" onClick={cycleSort} whileTap={{ scale: 0.94 }} aria-label={`Sort: ${SORT_LABEL[sort]}. Tap to change.`}>
+            <ArrowUpDown size={14} strokeWidth={2.4} />
+            <AnimatePresence mode="popLayout" initial={false}>
+              <motion.span key={sort} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.16 }}>
+                {SORT_LABEL[sort]}
+              </motion.span>
+            </AnimatePresence>
+          </motion.button>
         </div>
       )}
 

@@ -102,3 +102,32 @@ alter table public.records add constraint records_data_encrypted
 alter table public.records drop constraint if exists records_table_name_check;
 alter table public.records add constraint records_table_name_check
   check (table_name in ('places', 'visits', 'walks', 'picks', 'lists'));
+
+-- ---------------------------------------------------------------------------
+-- Photos across devices (added Oct 2026). Safe to re-run.
+-- A private bucket; each account can only touch files under its own folder
+-- (<user id>/...). The app encrypts every photo before upload, so the bucket
+-- only ever holds ciphertext. Free plan: 1 GB of storage, roughly 2,000 photos.
+-- ---------------------------------------------------------------------------
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('photos', 'photos', false, 5242880)
+on conflict (id) do update set public = false, file_size_limit = 5242880;
+
+drop policy if exists "wander photos: select own" on storage.objects;
+drop policy if exists "wander photos: insert own" on storage.objects;
+drop policy if exists "wander photos: update own" on storage.objects;
+drop policy if exists "wander photos: delete own" on storage.objects;
+
+create policy "wander photos: select own" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'photos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "wander photos: insert own" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'photos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "wander photos: update own" on storage.objects
+  for update to authenticated
+  using (bucket_id = 'photos' and (storage.foldername(name))[1] = (select auth.uid())::text)
+  with check (bucket_id = 'photos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "wander photos: delete own" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'photos' and (storage.foldername(name))[1] = (select auth.uid())::text);

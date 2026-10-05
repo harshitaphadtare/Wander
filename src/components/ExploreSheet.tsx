@@ -3,9 +3,15 @@ import {
   Bookmark,
   BookmarkCheck,
   CalendarDays,
+  ChevronDown,
+  Clock,
+  CloudOff,
+  CloudRain,
+  CloudSun,
   Coffee,
   Compass,
   Footprints,
+  MapPin,
   Mountain,
   Navigation,
   RefreshCw,
@@ -18,11 +24,12 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { PlaceWithStats } from '../hooks/useData'
 import { aiAvailable } from '../lib/ai'
 import type { Pick, PickItem } from '../lib/db'
 import {
+  aiPicks,
   directionsUrl,
   explore,
   prettyKind,
@@ -32,10 +39,12 @@ import {
   type ExploreResult,
   type Mood,
   type Reach,
+  type TilePois,
   type TimeBudget,
 } from '../lib/explore'
 import { duration, timeOfDay } from '../lib/format'
 import type { LatLng } from '../lib/geo'
+import { isAbort } from '../lib/net'
 import { currentPick, makePick, type PickPeriod } from '../lib/picks'
 import type { Route } from '../lib/routing'
 import { IconTile } from '../ui/bits'
@@ -53,6 +62,17 @@ const MOODS: { key: Mood; label: string; blurb: string; icon: LucideIcon; color:
 ]
 const MOOD_BY_KEY = Object.fromEntries(MOODS.map((m) => [m.key, m])) as Record<Mood, (typeof MOODS)[number]>
 
+/** What the status line says while a mood is loading. */
+const SEARCHING: Record<Mood, string> = {
+  stroll: 'Drawing a loop from here',
+  new: 'Looking for somewhere new',
+  food: 'Finding places you haven’t eaten',
+  coffee: 'Finding cafés near you',
+  sunset: 'Finding a spot for the sunset',
+  hike: 'Finding trails and lookouts',
+  surprise: 'Picking somewhere for you',
+}
+
 export interface ExploreShow {
   picks: { id: string; name: string; lat: number; lng: number; category: string }[]
   loop: Route | null
@@ -63,6 +83,8 @@ interface Props {
   /** true when `at` is the map centre because there's no location fix */
   approximate: boolean
   places: PlaceWithStats[]
+  /** POIs from the loaded map tiles: Explore's instant fallback when the network is slow */
+  tiles?: TilePois
   onShow(show: ExploreShow): void
   /** Minimised: the parent re-frames the map with less room taken by the sheet. */
   onCollapse?(collapsed: boolean): void
@@ -74,7 +96,7 @@ interface Props {
 
 type Stage = { kind: 'moods' } | { kind: 'results'; mood: Mood }
 
-export default function ExploreSheet({ at, approximate, places, onShow, onCollapse, onFocus, onWalk, onSave, onClose }: Props) {
+export default function ExploreSheet({ at, approximate, places, tiles, onShow, onCollapse, onFocus, onWalk, onSave, onClose }: Props) {
   const [collapsed, setCollapsedState] = useState(false)
   const setCollapsed = (c: boolean) => {
     setCollapsedState(c)
@@ -86,6 +108,7 @@ export default function ExploreSheet({ at, approximate, places, onShow, onCollap
   const [result, setResult] = useState<ExploreResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [slow, setSlow] = useState(false)
   const [seed, setSeed] = useState(0)
   const [saved, setSaved] = useState<Set<string>>(new Set())
   const shown = useRef(new Set<string>())
@@ -109,9 +132,11 @@ export default function ExploreSheet({ at, approximate, places, onShow, onCollap
         setCuisinePage(0)
       }
       setLoading(true)
+      setSlow(false)
       setError(null)
+      const slowTimer = setTimeout(() => !c.signal.aborted && setSlow(true), 3_500)
       try {
-        const r = await explore({ mood: m, at, time, reach, places, seed: s, exclude: shown.current, useAi: aiAvailable, signal: c.signal })
+        const r = await explore({ mood: m, at, time, reach, places, seed: s, exclude: shown.current, tiles, signal: c.signal })
         if (c.signal.aborted) return
         // Shuffle: when the pool runs dry, start over rather than showing nothing.
         if (!r.picks.length && !r.loop && shown.current.size) {
@@ -121,19 +146,34 @@ export default function ExploreSheet({ at, approximate, places, onShow, onCollap
         r.picks.forEach((p) => shown.current.add(p.id))
         if (fresh) setBasePool(r.pool)
         setResult(r)
+        setLoading(false)
         onShow({ picks: r.picks, loop: r.loop ?? null })
+
+        // Wander's own picks are already on screen; AI only swaps in better ones if it's quick.
+        if (aiAvailable && !r.loop) {
+          const ranked = await aiPicks(r, m, places, c.signal)
+          if (ranked && !c.signal.aborted) {
+            ranked.forEach((p) => shown.current.add(p.id))
+            setResult({ ...r, picks: ranked, ai: true })
+            onShow({ picks: ranked, loop: null })
+          }
+        }
       } catch (err) {
-        if ((err as Error).name === 'AbortError') return
+        if (isAbort(err) || c.signal.aborted) return
+        const msg = (err as Error).message || ''
         setError(
-          /busy|Overpass/i.test((err as Error).message)
+          /busy|Overpass|Nothing found/i.test(msg)
             ? 'OpenStreetMap is busy right now. Give it a few seconds and try again.'
-            : (err as Error).message || 'Something went wrong.',
+            : /fetch|network|load failed|timed out/i.test(msg)
+              ? 'Couldn’t reach the map data. Check your connection and try again.'
+              : msg || 'Something went wrong.',
         )
       } finally {
+        clearTimeout(slowTimer)
         if (!c.signal.aborted) setLoading(false)
       }
     },
-    [at, time, reach, places, onShow],
+    [at, time, reach, places, tiles, onShow],
   )
 
   // Re-run when the limits change on the results screen.
@@ -155,6 +195,7 @@ export default function ExploreSheet({ at, approximate, places, onShow, onCollap
     ctrl.current?.abort()
     setStage({ kind: 'moods' })
     setResult(null)
+    setError(null)
     setLoading(false)
     onShow({ picks: [], loop: null })
   }
@@ -227,9 +268,9 @@ export default function ExploreSheet({ at, approximate, places, onShow, onCollap
         ) : undefined
       }
       footer={
-        M && (result || error) ? (
+        M && result && !loading && !error ? (
           <div className="btn-row">
-            <motion.button className="btn grow" onClick={shuffle} disabled={loading} whileTap={{ scale: 0.97 }}>
+            <motion.button className="btn grow" onClick={shuffle} whileTap={{ scale: 0.97 }}>
               <Shuffle size={17} strokeWidth={2.4} /> {mood === 'stroll' ? 'Another loop' : 'Shuffle'}
             </motion.button>
           </div>
@@ -240,6 +281,7 @@ export default function ExploreSheet({ at, approximate, places, onShow, onCollap
         <p className="body-muted">Finding where you are…</p>
       ) : stage.kind === 'moods' ? (
         <>
+          <FilterBar key="moods" time={time} reach={reach} onTime={setTime} onReach={setReach} />
           <div className="mood-grid">
             {MOODS.map((m, i) => (
               <motion.button
@@ -261,13 +303,19 @@ export default function ExploreSheet({ at, approximate, places, onShow, onCollap
               </motion.button>
             ))}
           </div>
-          <Limits time={time} reach={reach} onTime={setTime} onReach={setReach} />
-          <ExploreNext at={at} places={places} onFocus={onFocus} onWalk={onWalk} onSave={onSave} />
+          <ExploreNext at={at} places={places} tiles={tiles} onFocus={onFocus} onWalk={onWalk} onSave={onSave} />
         </>
       ) : (
         <>
-          <Limits time={time} reach={reach} onTime={setTime} onReach={setReach} compact hideReach={mood === 'stroll'} />
-          {result?.context && <ContextLine ctx={result.context} ai={result.ai} />}
+          <FilterBar
+            key={mood}
+            time={time}
+            reach={reach}
+            onTime={setTime}
+            onReach={setReach}
+            hideReach={mood === 'stroll'}
+            extra={result?.context && !loading ? <ContextChips ctx={result.context} ai={result.ai} /> : null}
+          />
           {cuisines.length > 1 && !loading && (
             <motion.div className="chips scroll cuisine-chips" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} role="radiogroup" aria-label="Cuisine">
               <button role="radio" aria-checked={cuisine === null} className={`chip ${cuisine === null ? 'is-on solid' : ''}`} onClick={() => setCuisine(null)}>
@@ -289,15 +337,36 @@ export default function ExploreSheet({ at, approximate, places, onShow, onCollap
               ))}
             </motion.div>
           )}
-          <AnimatePresence mode="wait">
+          <AnimatePresence mode="wait" initial={false}>
             {loading ? (
-              <motion.div key="loading" className="explore-loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                {[0, 1, 2].map((i) => (
-                  <span key={i} className="skeleton-card" style={{ animationDelay: `${i * 0.12}s` }} />
+              <motion.div
+                key="loading"
+                className="explore-loading"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0, transition: { duration: 0.12 } }}
+              >
+                <p className="explore-status" role="status" aria-live="polite" style={{ '--c': M?.color } as CSSProperties}>
+                  <span className="explore-status-dot" />
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.span key={slow ? 'slow' : 'fast'} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}>
+                      {slow ? 'Still looking. The free map servers are slow right now…' : `${mood ? SEARCHING[mood] : 'Looking'}…`}
+                    </motion.span>
+                  </AnimatePresence>
+                </p>
+                {[0, 1].map((i) => (
+                  <span key={i} className="skeleton-card" style={{ animationDelay: `${i * 0.12}s` }}>
+                    <i />
+                    <i />
+                    <i />
+                  </span>
                 ))}
               </motion.div>
             ) : error ? (
               <motion.div key="error" className="explore-empty" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+                <span className="explore-empty-icon">
+                  <CloudOff size={22} strokeWidth={2.2} />
+                </span>
                 <p>{error}</p>
                 <button className="btn small" onClick={() => mood && run(mood, seed, true)}>
                   <RefreshCw size={15} /> Try again
@@ -307,10 +376,25 @@ export default function ExploreSheet({ at, approximate, places, onShow, onCollap
               <LoopCard key={`loop-${seed}`} loop={result.loop} weather={result.context.weather} />
             ) : result && picks.length === 0 ? (
               <motion.div key="none" className="explore-empty" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-                <p>Nothing fits right now. Try more time or a bigger radius.</p>
+                <span className="explore-empty-icon">
+                  <Compass size={22} strokeWidth={2.2} />
+                </span>
+                <p>Nothing fits right now. Give yourself more time, or go a little further.</p>
+                <div className="btn-row">
+                  {time < 240 && (
+                    <button className="btn small" onClick={() => setTime(nextUp(TIME_OPTIONS, time))}>
+                      <Clock size={15} /> More time
+                    </button>
+                  )}
+                  {reach < 30000 && mood !== 'stroll' && (
+                    <button className="btn small" onClick={() => setReach(nextUp(REACH_OPTIONS, reach))}>
+                      <MapPin size={15} /> Further
+                    </button>
+                  )}
+                </div>
               </motion.div>
             ) : (
-              <motion.ul key={`picks-${seed}-${cuisine}-${cuisinePage}`} className="pick-list">
+              <motion.ul key={`picks-${seed}-${cuisine}-${cuisinePage}-${result?.ai}`} className="pick-list" exit={{ opacity: 0, transition: { duration: 0.12 } }}>
                 {picks.map((p, i) => (
                   <PickCard
                     key={p.id}
@@ -334,25 +418,87 @@ export default function ExploreSheet({ at, approximate, places, onShow, onCollap
   )
 }
 
-function Limits({
+function nextUp<T extends number>(options: readonly (readonly [T, string])[], value: T): T {
+  const i = options.findIndex(([v]) => v === value)
+  return options[Math.min(options.length - 1, i + 1)][0]
+}
+
+/**
+ * Time and distance as two compact pills; tapping one opens its options in a
+ * drawer underneath. Keeps the results, not the controls, on screen.
+ */
+function FilterBar({
   time,
   reach,
   onTime,
   onReach,
-  compact,
   hideReach,
+  extra,
 }: {
   time: TimeBudget
   reach: Reach
   onTime(t: TimeBudget): void
   onReach(r: Reach): void
-  compact?: boolean
   hideReach?: boolean
+  extra?: ReactNode
 }) {
+  const [open, setOpen] = useState<'time' | 'reach' | null>(null)
+  const label = <T extends number>(opts: readonly (readonly [T, string])[], v: T) => opts.find(([x]) => x === v)?.[1] ?? ''
+  const pill = (key: 'time' | 'reach', Icon: LucideIcon, text: string, aria: string) => (
+    <motion.button
+      key={key}
+      className={`filter-pill ${open === key ? 'is-open' : ''}`}
+      onClick={() => setOpen(open === key ? null : key)}
+      aria-expanded={open === key}
+      aria-label={`${aria}: ${text}`}
+      whileTap={{ scale: 0.95 }}
+    >
+      <Icon size={15} strokeWidth={2.4} />
+      <span>{text}</span>
+      <ChevronDown size={14} strokeWidth={2.6} className="filter-caret" />
+    </motion.button>
+  )
   return (
-    <div className={`limits ${compact ? 'compact' : ''}`}>
-      <ChipRow label="Time" options={TIME_OPTIONS} value={time} onChange={onTime} />
-      {!hideReach && <ChipRow label="How far" options={REACH_OPTIONS} value={reach} onChange={onReach} />}
+    <div className="filter-bar">
+      <div className="filter-pills">
+        {pill('time', Clock, label(TIME_OPTIONS, time), 'Time you’ve got')}
+        {!hideReach && pill('reach', MapPin, label(REACH_OPTIONS, reach), 'How far')}
+        {extra}
+      </div>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="drawer"
+            className="filter-drawer"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.26, ease: [0.16, 1, 0.3, 1] }}
+          >
+            {open === 'time' ? (
+              <ChipRow
+                label="Time you’ve got"
+                options={TIME_OPTIONS}
+                value={time}
+                onChange={(v) => {
+                  onTime(v)
+                  setOpen(null)
+                }}
+              />
+            ) : (
+              <ChipRow
+                label="How far you’ll go"
+                options={REACH_OPTIONS}
+                value={reach}
+                onChange={(v) => {
+                  onReach(v)
+                  setOpen(null)
+                }}
+              />
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
@@ -383,22 +529,29 @@ function ChipRow<T extends number>({
   )
 }
 
-function ContextLine({ ctx, ai }: { ctx: ExploreResult['context']; ai: boolean }) {
+/** Weather, sunset and the AI tag, riding along in the filter row. */
+function ContextChips({ ctx, ai }: { ctx: ExploreResult['context']; ai: boolean }) {
   const toSunset = ctx.sunset ? ctx.sunset.getTime() - Date.now() : null
   return (
-    <motion.div className="context-line" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}>
-      {ctx.weather && <span>{ctx.rainy ? `${cap(ctx.weather)} · indoor picks first` : cap(ctx.weather)}</span>}
+    <>
+      {ctx.weather && (
+        <motion.span className={`context-chip ${ctx.rainy ? 'wet' : ''}`} initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}>
+          {ctx.rainy ? <CloudRain size={14} strokeWidth={2.4} /> : <CloudSun size={14} strokeWidth={2.4} />}
+          {cap(ctx.weather)}
+        </motion.span>
+      )}
       {ctx.sunset && toSunset !== null && toSunset > 0 && toSunset < 12 * 3_600_000 && (
-        <span>
-          Sunset {timeOfDay(ctx.sunset.getTime())} · {duration(toSunset)} left
-        </span>
+        <motion.span className="context-chip sun" initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.05 }}>
+          <Sunset size={14} strokeWidth={2.4} />
+          {timeOfDay(ctx.sunset.getTime())}
+        </motion.span>
       )}
       {ai && (
-        <span className="ai-tag">
-          <Sparkles size={12} /> Picked with AI
-        </span>
+        <motion.span className="context-chip ai-tag" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
+          <Sparkles size={12} /> AI picks
+        </motion.span>
       )}
-    </motion.div>
+    </>
   )
 }
 
@@ -426,6 +579,7 @@ function PickCard({
   onWalk(): void
   onSave(): void
 }) {
+  const kind = cap(pick.cuisine && pick.category === 'restaurant' ? `${cap(pick.cuisine)} restaurant` : prettyKind(pick.category))
   return (
     <motion.li
       className="pick-card"
@@ -433,17 +587,18 @@ function PickCard({
       animate={{ opacity: 1, y: 0 }}
       transition={{ type: 'spring', stiffness: 380, damping: 32, delay: index * 0.06 }}
     >
-      <button className="pick-main" onClick={onFocus}>
+      <button className="pick-main" onClick={onFocus} aria-label={`Show ${pick.name} on the map`}>
         <IconTile icon={categoryIcon(pick.category)} color="var(--accent)" size={42} />
         <span className="pick-text">
           <strong>{pick.name}</strong>
-          <small>{cap(pick.cuisine && pick.category === 'restaurant' ? `${cap(pick.cuisine)} restaurant` : prettyKind(pick.category))}</small>
+          <small>{kind}</small>
         </span>
+        <MapPin size={16} strokeWidth={2.3} className="pick-locate" aria-hidden />
       </button>
       <p className="pick-reason">{pick.reason}</p>
       <div className="fact-chips">
         {pick.facts.map((f) => (
-          <span key={f} className={`fact ${/^(Never been|On your wishlist)$/.test(f) ? 'new' : ''}`}>
+          <span key={f} className={`fact ${/^(Never been|On your wishlist)$/.test(f) ? 'new' : /^(Open|Closes)/.test(f) ? 'open' : ''}`}>
             {f}
           </span>
         ))}
@@ -506,12 +661,14 @@ const PERIODS: { key: PickPeriod; title: string; icon: LucideIcon }[] = [
 function ExploreNext({
   at,
   places,
+  tiles,
   onFocus,
   onWalk,
   onSave,
 }: {
   at: LatLng
   places: PlaceWithStats[]
+  tiles?: TilePois
   onFocus(at: LatLng): void
   onWalk: Props['onWalk']
   onSave: Props['onSave']
@@ -519,25 +676,42 @@ function ExploreNext({
   const [picks, setPicks] = useState<Partial<Record<PickPeriod, Pick | 'loading' | 'error'>>>({})
   const atRef = useRef(at)
   const placesRef = useRef(places)
+  const tilesRef = useRef(tiles)
   atRef.current = at
   placesRef.current = places
+  tilesRef.current = tiles
+  /** Cancelled when Explore closes or a mood is picked, so these never compete with the search you asked for. */
+  const ctrl = useRef(new AbortController())
+  useEffect(() => {
+    const c = new AbortController()
+    ctrl.current = c
+    return () => c.abort()
+  }, [])
 
   const load = useCallback(async (period: PickPeriod, regenerate = false) => {
+    const signal = ctrl.current.signal
     setPicks((p) => ({ ...p, [period]: 'loading' }))
     try {
       const existing = regenerate ? undefined : await currentPick(period)
-      const pick = existing ?? (await makePick(period, atRef.current, placesRef.current, regenerate ? Date.now() % 1000 : 0))
-      setPicks((p) => ({ ...p, [period]: pick }))
+      const pick =
+        existing ?? (await makePick(period, atRef.current, placesRef.current, regenerate ? Date.now() % 1000 : 0, signal, tilesRef.current))
+      if (!signal.aborted) setPicks((p) => ({ ...p, [period]: pick }))
     } catch {
-      setPicks((p) => ({ ...p, [period]: 'error' }))
+      if (!signal.aborted) setPicks((p) => ({ ...p, [period]: 'error' }))
     }
   }, [])
 
   useEffect(() => {
-    // One after another, to go easy on the free Overpass servers.
-    void (async () => {
-      for (const { key } of PERIODS) await load(key)
-    })()
+    // One after another, to go easy on the free servers; a beat first so a quick mood tap wins.
+    const timer = setTimeout(() => {
+      void (async () => {
+        for (const { key } of PERIODS) {
+          if (ctrl.current.signal.aborted) return
+          await load(key)
+        }
+      })()
+    }, 400)
+    return () => clearTimeout(timer)
   }, [load])
 
   return (

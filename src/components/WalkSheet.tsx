@@ -67,6 +67,7 @@ export default function WalkSheet({ target, planner, onStart, onClose }: Props) 
               <strong className="display">{duration(route.durationS * 1000)}</strong>
               <span>
                 {formatDistance(route.distanceM)} · arrive {arriveAt && timeOfDay(arriveAt.getTime())}
+                {route.endGapM ? <em className="walk-gap">The last {formatDistance(route.endGapM)} isn’t on mapped paths, so follow the signs.</em> : null}
               </span>
             </motion.div>
           ) : (

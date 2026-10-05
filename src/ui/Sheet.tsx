@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronUp, X } from 'lucide-react'
 import { AnimatePresence, motion, useDragControls, type PanInfo } from 'motion/react'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useIsDesktop } from '../hooks/useMedia'
 
 interface Props {
@@ -29,6 +29,8 @@ const exitEase = { duration: 0.2, ease: [0.4, 0, 1, 1] } as const
 export default function Sheet({ eyebrow, title, subtitle, leading, onClose, children, footer, collapsed = false, onToggleCollapse }: Props) {
   const desktop = useIsDesktop()
   const drag = useDragControls()
+  /** A hairline under the header once the body scrolls, so content doesn't just vanish under the title. */
+  const [scrolled, setScrolled] = useState(false)
 
   const onDragEnd = (_: unknown, info: PanInfo) => {
     const down = info.offset.y > 110 || info.velocity.y > 650
@@ -50,7 +52,7 @@ export default function Sheet({ eyebrow, title, subtitle, leading, onClose, chil
   return (
     <motion.section
       layout={onToggleCollapse ? 'size' : false}
-      className={`sheet ${collapsed ? 'is-collapsed' : ''}`}
+      className={`sheet ${collapsed ? 'is-collapsed' : ''} ${scrolled && !collapsed ? 'is-scrolled' : ''}`}
       role="dialog"
       aria-modal="false"
       initial={desktop ? { x: -28, opacity: 0 } : { y: '105%' }}
@@ -113,7 +115,9 @@ export default function Sheet({ eyebrow, title, subtitle, leading, onClose, chil
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
           >
-            <div className="sheet-body">{children}</div>
+            <div className="sheet-body" onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 4)}>
+              {children}
+            </div>
             {footer && <footer className="sheet-footer">{footer}</footer>}
           </motion.div>
         )}

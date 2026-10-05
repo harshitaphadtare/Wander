@@ -49,7 +49,11 @@ export interface List extends SyncFields {
   createdAt: number
 }
 
-/** A visit photo, resized on the device. Never synced or backed up to the cloud. */
+/**
+ * A visit photo, resized on the device. When you're signed in it's encrypted on
+ * the device and backed up to your private storage folder, so it shows on your
+ * other devices too (lib/photoSync.ts). The blobs never go through `records`.
+ */
 export interface Photo {
   id: string
   visitId: string
@@ -59,6 +63,8 @@ export interface Photo {
   width: number
   height: number
   createdAt: number
+  /** 1 once the encrypted copy is in cloud storage (or it came from there) */
+  uploaded?: 0 | 1
 }
 
 // Tables for later phases (walk planner, AI picks); defined now so the schema is stable.

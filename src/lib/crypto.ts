@@ -80,3 +80,20 @@ export async function open<T>(key: CryptoKey, table: string, id: string, sealed:
   )
   return JSON.parse(new TextDecoder().decode(plain)) as T
 }
+
+const photoAad = (id: string, kind: string) => new TextEncoder().encode(`wander:photo:${id}:${kind}`)
+
+/** Encrypt raw bytes (a photo) as iv ‖ ciphertext, bound to the photo id and size. */
+export async function sealBytes(key: CryptoKey, id: string, kind: string, bytes: ArrayBuffer): Promise<Uint8Array> {
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: photoAad(id, kind) }, key, bytes))
+  const out = new Uint8Array(12 + ct.length)
+  out.set(iv)
+  out.set(ct, 12)
+  return out
+}
+
+export async function openBytes(key: CryptoKey, id: string, kind: string, sealed: ArrayBuffer): Promise<ArrayBuffer> {
+  const all = new Uint8Array(sealed)
+  return crypto.subtle.decrypt({ name: 'AES-GCM', iv: all.slice(0, 12), additionalData: photoAad(id, kind) }, key, all.slice(12))
+}

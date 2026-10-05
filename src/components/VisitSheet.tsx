@@ -33,7 +33,7 @@ function useAutosize(ref: React.RefObject<HTMLTextAreaElement | null>, value: st
   }, [ref, value])
 }
 
-/** One check-in as a memory: a note, your steps, and photos (photos stay on this device). */
+/** One check-in as a memory: a note, your steps, and photos (backed up encrypted when you're signed in). */
 export default function VisitSheet({ visitId, place, onOpenPlace, notify, onClose }: Props) {
   const confirm = useConfirm()
   const visit = useLiveQuery(() => db.visits.get(visitId), [visitId])
@@ -199,7 +199,7 @@ export default function VisitSheet({ visitId, place, onOpenPlace, notify, onClos
         </div>
       </section>
 
-      <p className="group-footer">Photos stay on this device. They’re resized to save space and never uploaded.</p>
+      <p className="group-footer">Photos are resized to save space. When you’re signed in they’re encrypted on this device, then backed up so your other devices show them too.</p>
 
       <AnimatePresence>
         {viewing !== null && (
@@ -211,7 +211,7 @@ export default function VisitSheet({ visitId, place, onOpenPlace, notify, onClos
             onDelete={async (item) => {
               const p = photos.find((x) => x.photo.id === item.id)
               if (!p) return
-              const ok = await confirm({ title: 'Delete this photo?', message: 'It’s only on this device, so it can’t be recovered.', confirmLabel: 'Delete', destructive: true })
+              const ok = await confirm({ title: 'Delete this photo?', message: 'It’s removed from all your devices and can’t be recovered.', confirmLabel: 'Delete', destructive: true })
               if (!ok) return
               await removePhoto(p.photo)
               setViewing(null)

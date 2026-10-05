@@ -3,11 +3,31 @@ import { motion } from 'motion/react'
 import { useEffect, useMemo, useState } from 'react'
 import type { PlaceWithStats } from '../hooks/useData'
 import { distanceM, formatDistance, type LatLng } from '../lib/geo'
+import { isAbort, withTimeout } from '../lib/net'
 import { prettyCategory, reverseGeocode, type PhotonPlace } from '../lib/photon'
 import type { PlaceInput } from '../lib/places'
 import { IconTile, Stagger } from '../ui/bits'
 import { categoryIcon, LEVEL_ICONS } from '../ui/icons'
 import Sheet from '../ui/Sheet'
+
+/** OpenMapTiles poi classes worth checking in at. */
+const MAP_CLASSES = ['cafe', 'restaurant', 'fast_food', 'bakery', 'ice_cream', 'bar', 'beer', 'park', 'garden', 'attraction', 'museum', 'art_gallery', 'library', 'shop', 'grocery', 'clothing_store']
+
+/** Real places (cafés, parks…) before streets and addresses; one per name; skip ones you've saved. */
+function tidy(found: PhotonPlace[], at: LatLng, places: PlaceWithStats[]): PhotonPlace[] {
+  const savedOsm = new Set(places.map((p) => p.osmId).filter(Boolean))
+  const savedNames = new Set(places.filter((p) => distanceM(at, p) < 150).map((p) => p.name.toLowerCase()))
+  const sorted = [...found].sort((a, b) => Number(!a.category) - Number(!b.category) || distanceM(at, a) - distanceM(at, b))
+  const seen = new Set<string>()
+  return sorted
+    .filter((f) => {
+      const key = f.name.toLowerCase()
+      if (seen.has(key) || savedNames.has(key) || (f.osmId && savedOsm.has(f.osmId))) return false
+      seen.add(key)
+      return true
+    })
+    .slice(0, 6)
+}
 
 export type PickChoice = { kind: 'saved'; place: PlaceWithStats } | { kind: 'new'; input: PlaceInput }
 
@@ -17,6 +37,8 @@ interface Props {
   mode: 'here' | 'pin'
   places: PlaceWithStats[]
   busy: boolean
+  /** Named POIs from the loaded map tiles, shown instantly while the server lookup runs. */
+  nearbyFromMap?: (at: LatLng, radiusM: number, classes: string[]) => { osmId: string; name: string; lat: number; lng: number; category: string }[]
   onChoose(choice: PickChoice): void
   onClose(): void
 }
@@ -25,12 +47,20 @@ interface Props {
  * "Where are you?" picker. Offers your saved places nearby first, then named
  * OpenStreetMap places around the point, then a free-text name.
  */
-export default function PickPlaceSheet({ at, accuracy, mode, places, busy, onChoose, onClose }: Props) {
-  const [suggestions, setSuggestions] = useState<PhotonPlace[] | null>(null)
+export default function PickPlaceSheet({ at, accuracy, mode, places, busy, nearbyFromMap, onChoose, onClose }: Props) {
+  const radius = Math.max(mode === 'here' ? 100 : 60, Math.min(accuracy ?? 0, 200))
+  // The map already knows the cafés and parks around you: show those straight away.
+  const [suggestions, setSuggestions] = useState<PhotonPlace[] | null>(() => {
+    try {
+      const fromMap = (nearbyFromMap?.(at, radius + 40, MAP_CLASSES) ?? []).map((p) => ({ name: p.name, lat: p.lat, lng: p.lng, category: p.category }))
+      return fromMap.length ? tidy(fromMap, at, places) : null
+    } catch {
+      return null
+    }
+  })
   const [lookupFailed, setLookupFailed] = useState(false)
   const [customName, setCustomName] = useState('')
 
-  const radius = Math.max(mode === 'here' ? 100 : 60, Math.min(accuracy ?? 0, 200))
   const nearbySaved = useMemo(
     () =>
       places
@@ -43,28 +73,13 @@ export default function PickPlaceSheet({ at, accuracy, mode, places, busy, onCho
 
   useEffect(() => {
     const ctrl = new AbortController()
-    reverseGeocode(at, ctrl.signal)
-      .then((found) => {
-        const savedOsm = new Set(places.map((p) => p.osmId).filter(Boolean))
-        // Real places (cafes, parks…) before streets and addresses; one entry per name.
-        const sorted = [...found].sort(
-          (a, b) => Number(!a.category) - Number(!b.category) || distanceM(at, a) - distanceM(at, b),
-        )
-        const seen = new Set<string>()
-        setSuggestions(
-          sorted.filter((f) => {
-            const key = f.name.toLowerCase()
-            if (seen.has(key) || (f.osmId && savedOsm.has(f.osmId))) return false
-            seen.add(key)
-            return true
-          }),
-        )
-      })
+    withTimeout(8_000, ctrl.signal, (signal) => reverseGeocode(at, signal))
+      .then((found) => setSuggestions((shown) => tidy([...found, ...(shown ?? [])], at, places)))
       .catch((err) => {
-        if ((err as Error).name !== 'AbortError') {
-          setSuggestions([])
-          setLookupFailed(true)
-        }
+        if (ctrl.signal.aborted) return
+        // Keep what the map gave us; only say the lookup failed if there's nothing to show.
+        setSuggestions((shown) => shown ?? [])
+        if (!isAbort(err)) setLookupFailed(true)
       })
     return () => ctrl.abort()
     // The sheet is keyed by point, so this runs once per sheet; `places` is only for de-duplication.
@@ -127,8 +142,8 @@ export default function PickPlaceSheet({ at, accuracy, mode, places, busy, onCho
           </p>
         ) : (
           <ul className="rows">
-            {suggestions.map((s, idx) => (
-              <Stagger key={s.osmId ?? idx} index={i++}>
+            {suggestions.map((s) => (
+              <Stagger key={s.name.toLowerCase()} index={i++}>
                 <button className="row" disabled={busy} onClick={() => onChoose({ kind: 'new', input: s })}>
                   <IconTile icon={categoryIcon(s.category)} color="var(--ink-2)" />
                   <span className="row-text">

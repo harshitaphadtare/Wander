@@ -143,6 +143,11 @@ export default function App() {
     (coords: [number, number][], radiusM: number) => map.current?.poisAlong(coords, radiusM) ?? Promise.resolve([]),
     [],
   )
+  /** Named POIs from the map tiles already loaded: instant and offline. */
+  const poisNear = useCallback(
+    (at: LatLng, radiusM: number, classes: string[]) => map.current?.poisNear(at, radiusM, classes) ?? [],
+    [],
+  )
   const planner = useWalkPlanner(sheet?.type === 'walk' ? { target: sheet.target, origin: sheet.origin } : null, tilePois)
   const active = useActiveWalk(geo.fix)
 
@@ -595,6 +600,7 @@ export default function App() {
             mode={sheet.mode}
             places={allPlaces}
             busy={busy}
+            nearbyFromMap={poisNear}
             onChoose={(c) => onPickChoice(sheet.mode, c)}
             onClose={close}
           />
@@ -624,6 +630,7 @@ export default function App() {
             at={here ?? map.current?.getCenter() ?? null}
             approximate={!here}
             places={allPlaces}
+            tiles={poisNear}
             onShow={setExploreShow}
             onCollapse={setExploreCollapsed}
             onFocus={(at) => flyTo(at, true, 16)}
@@ -733,7 +740,7 @@ export default function App() {
           flyTo(r)
         }}
           onOpenSettings={() => setSheet(sheet?.type === 'settings' ? null : { type: 'settings' })}
-          nearbyFromMap={(at, radiusM, classes) => map.current?.poisNear(at, radiusM, classes) ?? []}
+          nearbyFromMap={poisNear}
         />
       )}
 

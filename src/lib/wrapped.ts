@@ -19,6 +19,8 @@ export interface Wrapped extends WrappedInput {
   byWeekday: number[]
   busiestDay?: string
   firstVisitAt?: number
+  /** steps logged on visits in the period */
+  steps: number
 }
 
 export function wrappedRange(period: WrappedPeriod, offset = 0, now = new Date()) {
@@ -92,6 +94,7 @@ export function computeWrapped(
     byWeekday,
     busiestDay: inRange.length ? WEEKDAYS[busiest] : undefined,
     firstVisitAt: inRange.at(-1)?.arrivedAt,
+    steps: inRange.reduce((sum, v) => sum + (v.steps ?? 0), 0),
   }
 }
 

@@ -202,13 +202,13 @@ ul {
   z-index: 1;
 }
 
-.maplibregl-ctrl-bottom-right {
-  bottom: calc(var(--sheet-bottom) - 4px);
-  right: calc(var(--safe-right) + 4px);
+.maplibregl-ctrl-bottom-left {
+  bottom: calc(var(--sheet-bottom) + 14px);
+  left: calc(var(--safe-left) + var(--gutter) - 6px);
   transition: opacity 0.2s;
 }
-.has-sheet .maplibregl-ctrl-bottom-right,
-.has-nearby .maplibregl-ctrl-bottom-right {
+.has-sheet .maplibregl-ctrl-bottom-left,
+.has-nearby .maplibregl-ctrl-bottom-left {
   opacity: 0;
   pointer-events: none;
 }
@@ -872,12 +872,27 @@ button.row:active:not(:disabled) {
 }
 
 .sheet-header {
+  position: relative;
   flex: none;
   display: flex;
   align-items: flex-start;
   gap: 12px;
   padding: 2px 14px 14px 20px;
   touch-action: none;
+}
+.sheet-header::after {
+  content: '';
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 0;
+  height: 1px;
+  background: var(--hairline);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.sheet.is-scrolled .sheet-header::after {
+  opacity: 1;
 }
 .sheet-titles {
   flex: 1;
@@ -900,6 +915,8 @@ button.row:active:not(:disabled) {
 .sheet-body {
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
@@ -1255,24 +1272,38 @@ button.row:active:not(:disabled) {
 }
 
 /* ============ Journal timeline ============ */
+/* A thin rail with one node per visit; the card takes the rest of the width, so
+   names, notes and photos never fight a time column on a phone. */
 .day + .day {
-  margin-top: 6px;
+  margin-top: 8px;
 }
 .day-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 14px;
   font-weight: 650;
   color: var(--ink);
-  padding: 6px 2px 8px;
+  padding: 4px 2px 10px;
+}
+.day-label span {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-3);
 }
 .timeline {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .timeline::before {
   content: '';
   position: absolute;
-  left: 61px;
-  top: 14px;
-  bottom: 14px;
+  left: 5px;
+  top: 22px;
+  bottom: 22px;
   width: 2px;
   border-radius: 1px;
   background: var(--surface-3);
@@ -1280,20 +1311,12 @@ button.row:active:not(:disabled) {
 .timeline-item {
   position: relative;
   display: grid;
-  grid-template-columns: 52px 12px 1fr auto;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 0;
-}
-.timeline-time {
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--ink-3);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  padding-right: 4px;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
 }
 .timeline-node {
+  margin-top: 22px;
   width: 12px;
   height: 12px;
   border-radius: 50%;
@@ -1304,40 +1327,65 @@ button.row:active:not(:disabled) {
 .timeline-card {
   min-width: 0;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 10px;
-  margin-left: 6px;
-  padding: 8px 10px;
-  border-radius: 16px;
+  padding: 10px 10px 12px 10px;
+  border-radius: 18px;
   background: var(--surface-2);
   text-align: left;
-  transition: transform 0.15s var(--ease-out);
+  cursor: pointer;
+  transition: transform 0.15s var(--ease-out), background 0.15s;
 }
 .timeline-card:active {
-  transform: scale(0.98);
+  transform: scale(0.985);
 }
-.timeline-card .row-text strong {
+@media (hover: hover) {
+  .timeline-card:hover {
+    background: color-mix(in srgb, var(--surface-3) 55%, var(--surface-2));
+  }
+}
+.timeline-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.timeline-head .row-text strong {
   font-size: 15px;
 }
+.timeline-time {
+  flex: none;
+  align-self: flex-start;
+  margin-top: 2px;
+  font-size: 12.5px;
+  font-weight: 560;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .timeline-delete {
-  width: 30px;
-  height: 30px;
-  display: grid;
+  display: none;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: -4px -4px 0 -6px;
   place-items: center;
   border-radius: 50%;
   color: var(--ink-3);
-  opacity: 0.6;
   transition: opacity 0.15s, background 0.15s;
 }
-@media (hover: hover) {
+/* Phones delete from the visit sheet; a mouse gets a quiet X on hover. */
+@media (hover: hover) and (pointer: fine) {
   .timeline-delete {
+    display: grid;
     opacity: 0;
   }
-  .timeline-item:hover .timeline-delete {
+  .timeline-card:hover .timeline-delete,
+  .timeline-delete:focus-visible {
     opacity: 0.8;
   }
   .timeline-delete:hover {
-    background: var(--surface-2);
+    background: var(--surface);
   }
 }
 
@@ -2275,12 +2323,14 @@ button.group-row:active:not(:disabled) {
     bottom: auto;
   }
 
-  .maplibregl-ctrl-bottom-right {
-    bottom: 76px;
-    right: 12px;
+  /* The side sheet covers the left edge on wide screens; sit beside the buttons instead. */
+  .maplibregl-ctrl-bottom-left {
+    bottom: 16px;
+    left: auto;
+    right: 76px;
   }
-  .has-sheet .maplibregl-ctrl-bottom-right,
-  .has-nearby .maplibregl-ctrl-bottom-right {
+  .has-sheet .maplibregl-ctrl-bottom-left,
+  .has-nearby .maplibregl-ctrl-bottom-left {
     opacity: 1;
     pointer-events: auto;
   }

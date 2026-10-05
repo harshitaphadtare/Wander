@@ -3,6 +3,7 @@ import { onLocalChange } from './changes'
 import { forgetKey, isSealed, keyFor, open, seal, type Sealed } from './crypto'
 import { db, getMeta, setMeta, SYNCED_TABLES, withoutDirty, type SyncedTable } from './db'
 import { mergeRows } from './merge'
+import { syncPhotos } from './photoSync'
 import { supabase } from './supabase'
 
 /**
@@ -150,6 +151,8 @@ async function runSync() {
     const key = await keyFor(session.user.id)
     await push(session.user.id, key)
     await pull(key)
+    // After the rows, so this device knows every visit's photo ids.
+    await syncPhotos(session.user.id, key)
     setState({ status: 'idle', lastSyncedAt: Date.now() })
   } catch (err) {
     setState({ status: 'error', error: err instanceof Error ? err.message : String((err as { message?: string }).message ?? err) })

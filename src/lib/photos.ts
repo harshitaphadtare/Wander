@@ -1,10 +1,12 @@
 import { notifyLocalChange } from './changes'
 import { db, type Photo } from './db'
+import { queuePhotoDeletes } from './photoSync'
 
 /**
- * Visit photos live only on this device: they're resized to at most 1600 px on
- * the long edge (JPEG ~80%) so a year of check-ins doesn't fill the phone, and
- * never sync. Only the photo ids ride along on the visit row.
+ * Visit photos are resized to at most 1600 px on the long edge (JPEG ~80%) so a
+ * year of check-ins doesn't fill the phone. The ids ride along on the visit row;
+ * when you're signed in, lib/photoSync.ts backs the images up, encrypted, so
+ * your other devices can show them.
  */
 const MAX_EDGE = 1600
 const QUALITY = 0.8
@@ -60,6 +62,7 @@ export async function addPhotos(visitId: string, files: FileList | File[]): Prom
 }
 
 export async function removePhoto(photo: Photo) {
+  await queuePhotoDeletes([photo.id])
   await db.transaction('rw', db.photos, db.visits, async () => {
     await db.photos.delete(photo.id)
     const visit = await db.visits.get(photo.visitId)
@@ -76,5 +79,8 @@ export async function removePhoto(photo: Photo) {
 
 /** Free the space when a visit goes away. */
 export async function removePhotosFor(visitIds: string[]) {
-  if (visitIds.length) await db.photos.where('visitId').anyOf(visitIds).delete()
+  if (!visitIds.length) return
+  const ids = (await db.photos.where('visitId').anyOf(visitIds).primaryKeys()) as string[]
+  await queuePhotoDeletes(ids)
+  await db.photos.bulkDelete(ids)
 }

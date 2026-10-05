@@ -158,7 +158,9 @@ export default function MapView({
       if (!map || coords.length < 2) return
       const b = new maplibregl.LngLatBounds(coords[0], coords[0])
       for (const c of coords) b.extend(c)
-      map.fitBounds(b, { padding, maxZoom: 17, duration: 900, essential: true })
+      // absolutePadding: replace, not add to, the padding a previous flyTo left on the map.
+      // Added together they can exceed the screen, and MapLibre then silently skips the fit.
+      map.fitBounds(b, { padding, absolutePadding: true, maxZoom: 17, duration: 900, essential: true })
     },
     async poisAlong(coords, radiusM) {
       const map = mapRef.current
@@ -185,7 +187,7 @@ export default function MapView({
       const b = new maplibregl.LngLatBounds(coords[0], coords[0])
       for (const c of coords) b.extend(c)
       // Pulled back a little so a single spot still shows its neighbourhood.
-      map.fitBounds(b, { padding, maxZoom: 15, duration: 1000, essential: true })
+      map.fitBounds(b, { padding, absolutePadding: true, maxZoom: 15, duration: 1000, essential: true })
     },
     getCenter() {
       const c = mapRef.current?.getCenter()
@@ -201,12 +203,14 @@ export default function MapView({
       style: STYLE_URL,
       center: view?.center ?? DEFAULT_CENTER,
       zoom: view?.zoom ?? 13,
-      attributionControl: { compact: true },
+      attributionControl: false,
       dragRotate: false,
       pitchWithRotate: false,
       fadeDuration: 200,
     })
     map.touchZoomRotate.disableRotation()
+    // Bottom-left: the right edge belongs to the heatmap and locate buttons.
+    map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-left')
     mapRef.current = map
     if (import.meta.env.DEV) (window as unknown as { __wanderMap: MLMap }).__wanderMap = map
 
@@ -482,7 +486,9 @@ export default function MapView({
           >
             {photo ? (
               <span className="pin-body pin-photo">
-                <img src={photo.url} alt="" draggable={false} />
+                <span className="pin-photo-img">
+                  <img src={photo.url} alt="" draggable={false} />
+                </span>
                 <span className="pin-photo-count">
                   <Camera size={10} strokeWidth={2.8} />
                   {photo.count}
@@ -557,7 +563,12 @@ function syncAccuracy(map: MLMap, fix: Fix | null) {
 }
 
 const TILE_CATEGORY: Record<string, string> = { beer: 'pub' }
-const KNOWN_CATEGORIES = new Set(['cafe', 'restaurant', 'fast_food', 'bakery', 'ice_cream', 'pub', 'bar'])
+const KNOWN_CATEGORIES = new Set([
+  'cafe', 'restaurant', 'fast_food', 'bakery', 'ice_cream', 'pub', 'bar',
+  // Explore's kinds of place, read straight from the tiles when the network is slow.
+  'park', 'garden', 'viewpoint', 'museum', 'gallery', 'attraction', 'library', 'arts_centre',
+  'monument', 'castle', 'beach', 'peak', 'pier', 'nature_reserve',
+])
 
 function tilePoisAlong(map: MLMap, coords: [number, number][], radiusM: number): OsmPoi[] {
   const line = lineString(coords)

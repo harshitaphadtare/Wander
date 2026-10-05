@@ -2,6 +2,7 @@ import type { PlaceWithStats } from '../hooks/useData'
 import { aiRank } from './ai'
 import { timeOfDay } from './format'
 import { distanceM, formatDistance, type LatLng } from './geo'
+import { abortable, withTimeout, within } from './net'
 import { overpass, type OverpassElement } from './overpass'
 import { nearbyByTags } from './photon'
 import { loopRoute, type Route } from './routing'
@@ -137,32 +138,106 @@ function toCandidate(el: OverpassElement): Candidate | null {
   }
 }
 
+/** Reads named POIs out of the map tiles already on the phone: instant and offline, but no hours or cuisine. */
+export type TilePois = (at: LatLng, radiusM: number, classes: string[]) => { osmId: string; name: string; lat: number; lng: number; category: string }[]
+
+/** OpenMapTiles poi classes per mood (the map's own data), and which kinds to keep from them. */
+const TILE_CLASSES: Record<Exclude<Mood, 'stroll' | 'surprise'>, string[]> = {
+  new: ['park', 'garden', 'attraction', 'museum', 'art_gallery', 'library', 'monument', 'castle'],
+  hike: ['park', 'attraction'],
+  food: ['restaurant', 'fast_food', 'cafe', 'ice_cream', 'bakery'],
+  coffee: ['cafe'],
+  sunset: ['attraction', 'park'],
+}
+const TILE_KEEP: Partial<Record<Exclude<Mood, 'stroll' | 'surprise'>, Set<string>>> = {
+  sunset: new Set(['viewpoint', 'beach', 'pier', 'peak']),
+  hike: new Set(['viewpoint', 'nature_reserve', 'national_park', 'peak', 'park']),
+}
+
 const cache = new Map<string, { at: number; list: Candidate[] }>()
 const CACHE_MS = 10 * 60_000
+/** OSM places barely change: a full Overpass answer is kept on the phone for a day, a quick one for an hour. */
+const STORE_KEY = 'wander:explore-cache'
+const STORE_MS = { rich: 24 * 3_600_000, quick: 3_600_000 }
+const STORE_MAX = 24
+
+type Stored = Record<string, { at: number; list: Candidate[]; rich?: boolean }>
+function readStore(): Stored {
+  try {
+    return JSON.parse(localStorage.getItem(STORE_KEY) || '{}') as Stored
+  } catch {
+    return {}
+  }
+}
+function writeStore(key: string, list: Candidate[], rich: boolean) {
+  try {
+    const all = readStore()
+    // Never let a quick answer overwrite a fuller one that's still fresh.
+    if (!rich && all[key]?.rich && Date.now() - all[key].at < STORE_MS.rich) return
+    all[key] = { at: Date.now(), list, rich }
+    const keep = Object.entries(all)
+      .sort((a, b) => b[1].at - a[1].at)
+      .slice(0, STORE_MAX)
+    localStorage.setItem(STORE_KEY, JSON.stringify(Object.fromEntries(keep)))
+  } catch {
+    /* storage full or blocked: the in-memory cache still works */
+  }
+}
+
+function dedupe(list: Candidate[]): Candidate[] {
+  const kept: Candidate[] = []
+  for (const c of list) {
+    // The same park is often mapped as a node and an area, or comes from two sources; keep the first.
+    const name = c.name.toLowerCase()
+    if (kept.some((k) => k.name.toLowerCase() === name && distanceM(k, c) < 120)) continue
+    kept.push(c)
+  }
+  return kept
+}
+
+/** How long to hold out for Overpass (it has hours and cuisine) before settling for a faster source. */
+const OVERPASS_GRACE_MS = 2_500
+/** Never keep anyone looking at skeletons longer than this. */
+const DEADLINE_MS = 9_000
 
 async function candidates(
-  tags: string[],
-  photonTags: string[],
+  mood: Exclude<Mood, 'stroll' | 'surprise'>[],
   at: LatLng,
   radiusM: number,
   signal?: AbortSignal,
+  tiles?: TilePois,
 ): Promise<Candidate[]> {
+  const tags = mood.flatMap((m) => MOOD_TAGS[m])
   // ~100 m grid for the cache key; OSM doesn't need your exact position.
-  const key = `${tags.join('|')}@${at.lat.toFixed(3)},${at.lng.toFixed(3)}/${radiusM}`
+  const key = `${mood.join('+')}@${at.lat.toFixed(3)},${at.lng.toFixed(3)}/${radiusM}`
   const hit = cache.get(key)
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.list
-
-  const fromOverpass = async () => {
-    const around = `around:${radiusM},${at.lat.toFixed(4)},${at.lng.toFixed(4)}`
-    const query = `[out:json][timeout:25];(${tags.map((t) => `nwr(${around})${t}["name"];`).join('')});out center tags 250;`
-    const elements = await overpass(query, signal).catch((err) => {
-      if (signal?.aborted) throw err
-      return overpass(query, signal, 30_000) // the free servers are often busy: one patient retry
-    })
-    return elements.map(toCandidate).filter((c): c is Candidate => !!c)
+  const stored = readStore()[key]
+  if (stored?.list.length && Date.now() - stored.at < STORE_MS[stored.rich ? 'rich' : 'quick']) {
+    cache.set(key, stored)
+    return stored.list
   }
-  const fromPhoton = async () => {
-    const found = await nearbyByTags(at, radiusM / 1000, photonTags, signal)
+
+  const remember = (list: Candidate[], rich: boolean) => {
+    cache.set(key, { at: Date.now(), list })
+    writeStore(key, list, rich)
+    return list
+  }
+
+  // Overpass runs on its own clock (not the caller's signal): if it lands after we've
+  // answered from a faster source, it still fills the cache, so the next look is richer.
+  const fromOverpass = (async () => {
+    const around = `around:${radiusM},${at.lat.toFixed(4)},${at.lng.toFixed(4)}`
+    const query = `[out:json][timeout:20];(${tags.map((t) => `nwr(${around})${t}["name"];`).join('')});out center tags 250;`
+    const elements = await overpass(query, undefined, 12_000)
+    const list = dedupe(elements.map(toCandidate).filter((c): c is Candidate => !!c))
+    if (!list.length) throw new Error('Nothing found nearby')
+    return remember(list, true)
+  })()
+  fromOverpass.catch(() => {}) // a late failure is fine
+
+  const fromPhoton = withTimeout(8_000, signal, async (s) => {
+    const found = await nearbyByTags(at, radiusM / 1000, mood.flatMap((m) => PHOTON_TAGS[m]), s)
     const list = found.map(
       (p): Candidate => ({
         id: p.osmId ?? `${p.name}|${p.lat.toFixed(4)}|${p.lng.toFixed(4)}`,
@@ -176,42 +251,39 @@ async function candidates(
     )
     if (!list.length) throw new Error('Nothing found nearby')
     return list
+  })
+  fromPhoton.catch(() => {})
+
+  const fromTiles = (): Candidate[] => {
+    if (!tiles) return []
+    try {
+      return mood.flatMap((m) =>
+        tiles(at, radiusM, TILE_CLASSES[m])
+          .filter((p) => !TILE_KEEP[m] || TILE_KEEP[m]!.has(p.category))
+          .map((p) => ({ id: p.osmId, osmId: '', name: p.name, lat: p.lat, lng: p.lng, category: p.category })),
+      )
+    } catch {
+      return []
+    }
   }
 
-  // Overpass has opening hours and cuisine, so it goes first. If it hasn't
-  // answered in 3.5 s (or fails), Photon races it: whichever lands first wins,
-  // so Explore never sits on a spinner just because a free server is busy.
-  const overpassTry = fromOverpass()
-  const photonTry = new Promise<Candidate[]>((resolve, reject) => {
-    const timer = setTimeout(() => fromPhoton().then(resolve, reject), 3_500)
-    overpassTry.then(
-      () => clearTimeout(timer), // Overpass won: no need to ask Photon
-      () => {
-        clearTimeout(timer)
-        fromPhoton().then(resolve, reject)
-      },
-    )
-    signal?.addEventListener('abort', () => clearTimeout(timer))
-  })
-  let found: Candidate[]
-  try {
-    photonTry.catch(() => {}) // a late loser's failure is fine
-    found = await Promise.any([overpassTry, photonTry])
-  } catch (err) {
-    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-    throw err instanceof AggregateError ? new Error('All Overpass servers are busy') : err
-  }
+  // 1. Overpass, if it's quick. When the map already shows plenty nearby, don't wait as long.
+  const local = fromTiles()
+  const grace = local.length >= 8 ? OVERPASS_GRACE_MS / 2 : OVERPASS_GRACE_MS
+  const quick = await abortable(within(fromOverpass, grace), signal)
+  if (quick?.length) return quick
 
-  const seen = new Set<string>()
-  const list = found.filter((c) => {
-    // The same park is often mapped as a node and an area; keep one.
-    const k = `${c.name.toLowerCase()}|${c.lat.toFixed(3)}|${c.lng.toFixed(3)}`
-    if (seen.has(k)) return false
-    seen.add(k)
-    return true
-  })
-  cache.set(key, { at: Date.now(), list })
-  return list
+  // 2. Otherwise whatever is in hand: Photon if it has answered, plus the map's own tiles.
+  const photonNow = await within(fromPhoton, 0)
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+  if (photonNow?.length || local.length >= 6) return remember(dedupe([...(photonNow ?? []), ...local]), false)
+
+  // 3. Wait for the first network answer, up to the deadline; fall back to the tiles.
+  const first = await abortable(within(Promise.any([fromOverpass, fromPhoton]), DEADLINE_MS - grace), signal)
+  if (first?.length) return remember(dedupe([...first, ...local]), false)
+  const late = fromTiles() // the map may have loaded more tiles while we waited
+  if (late.length) return remember(dedupe(late), false)
+  throw new Error('OpenStreetMap is busy')
 }
 
 // ---------------------------------------------------------------- context ----
@@ -219,7 +291,8 @@ async function candidates(
 async function context(at: LatLng, signal?: AbortSignal): Promise<{ ctx: ExploreContext; hours: WeatherHour[] }> {
   const sunset = nextSunset(at) ?? undefined
   try {
-    const hours = await hourlyForecast(at, signal)
+    // Weather is a nice-to-have: never hold the picks up for it.
+    const hours = await withTimeout(3_000, signal, (s) => hourlyForecast(at, s))
     const now = Date.now()
     const next = hours.filter((h) => h.t + 3_600_000 > now).slice(0, 3)
     if (!next.length) return { ctx: { rainy: false, sunset }, hours }
@@ -316,6 +389,8 @@ interface Options {
   exclude?: Set<string>
   /** let Gemini rank and explain (when available) */
   useAi?: boolean
+  /** POIs from the loaded map tiles: the instant, offline fallback */
+  tiles?: TilePois
   signal?: AbortSignal
 }
 
@@ -323,18 +398,19 @@ const STROLL_M: Record<TimeBudget, number> = { 30: 2200, 60: 4400, 120: 8000, 24
 
 export async function explore(o: Options): Promise<ExploreResult> {
   const seed = o.seed ?? 0
-  const [{ ctx }, OH] = await Promise.all([context(o.at, o.signal), loadOpeningHours().catch(() => null)])
+  // Weather, the hours parser and the places all load at once; none waits on another.
+  const ctxP = context(o.at, o.signal)
+  const ohP = loadOpeningHours().catch(() => null)
 
   if (o.mood === 'stroll') {
-    const loop = await loopRoute(o.at, STROLL_M[o.time], seed, o.signal)
+    const [loop, { ctx }] = await Promise.all([withTimeout(15_000, o.signal, (s) => loopRoute(o.at, STROLL_M[o.time], seed, s)), ctxP])
     return { picks: [], pool: [], context: ctx, loop, ai: false }
   }
 
   const mood = o.mood
   const moods: (keyof typeof MOOD_TAGS)[] = mood === 'surprise' ? ['new', 'food'] : [mood]
   const radius = mood === 'hike' ? Math.min(40_000, Math.max(8_000, o.reach * 2.5)) : o.reach
-  const tags = moods.flatMap((m) => MOOD_TAGS[m])
-  const found = await candidates(tags, moods.flatMap((m) => PHOTON_TAGS[m]), o.at, radius, o.signal)
+  const [found, { ctx }, OH] = await Promise.all([candidates(moods, o.at, radius, o.signal, o.tiles), ctxP, ohP])
 
   // Match OSM results to your saved places (same feature, or same name within 40 m).
   const byOsm = new Map(o.places.filter((p) => p.osmId).map((p) => [p.osmId!, p]))
@@ -385,8 +461,7 @@ export async function explore(o: Options): Promise<ExploreResult> {
     const facts = [
       visits === 0 ? (wishlist ? 'On your wishlist' : 'Never been') : `Been ${visits}×`,
       far ? `${formatDistance(d)} away` : `${Math.max(1, mins)} min walk`,
-      open.text ?? (needsOpen ? 'Hours not listed' : undefined),
-      ctx.weather && !far ? ctx.weather[0].toUpperCase() + ctx.weather.slice(1) : undefined,
+      open.text,
     ].filter((f): f is string => !!f)
 
     const base = { ...c, distanceM: d, visits, savedPlaceId: saved?.id, wishlist, far, facts }
@@ -398,14 +473,30 @@ export async function explore(o: Options): Promise<ExploreResult> {
   let picks = pool.slice(0, count)
   let ai = false
 
-  if (o.useAi && pool.length > 1) {
-    const top = pool.slice(0, 15)
-    const taste = tasteProfile(o.places)
-    const ranked = await aiRank(
+  if (o.useAi) {
+    const ranked = await aiPicks({ picks, pool, context: ctx, ai: false }, mood, o.places, o.signal)
+    if (ranked) {
+      picks = ranked
+      ai = true
+    }
+  }
+  return { picks, pool, context: ctx, ai }
+}
+
+/**
+ * Let Gemini choose and explain from the real candidates. Optional and capped at
+ * a few seconds: callers show the rule-based picks first and swap these in if they arrive.
+ */
+export async function aiPicks(r: ExploreResult, mood: Mood, places: PlaceWithStats[], signal?: AbortSignal): Promise<ExplorePick[] | null> {
+  if (r.pool.length < 2 || mood === 'stroll') return null
+  const count = mood === 'surprise' ? 1 : 4
+  const top = r.pool.slice(0, 15)
+  const ranked = await withTimeout(5_000, signal, (s) =>
+    aiRank(
       {
         mood,
-        weather: ctx.weather,
-        taste,
+        weather: r.context.weather,
+        taste: tasteProfile(places),
         count,
         candidates: top.map((p) => ({
           id: p.id,
@@ -416,15 +507,15 @@ export async function explore(o: Options): Promise<ExploreResult> {
           open: p.facts.find((f) => /^(Open|Closes|Opens)/.test(f)),
         })),
       },
-      o.signal,
-    )
-    if (ranked?.length) {
-      const byId = new Map(top.map((p) => [p.id, p]))
-      picks = ranked.slice(0, count).map((r) => ({ ...byId.get(r.id)!, reason: r.reason }))
-      ai = true
-    }
-  }
-  return { picks, pool, context: ctx, ai }
+      s,
+    ),
+  ).catch((err) => {
+    if (signal?.aborted) throw err
+    return null // slow or failed: keep Wander's own picks
+  })
+  if (!ranked?.length) return null
+  const byId = new Map(top.map((p) => [p.id, p]))
+  return ranked.slice(0, count).map((x) => ({ ...byId.get(x.id)!, reason: x.reason }))
 }
 
 /** Your most-visited kinds of place, for the AI's sense of your taste. */

@@ -166,13 +166,17 @@ export default function JournalPanel({ visits, places, period, onPeriod, onHeatm
         <div key={period}>
           {groups.map((g) => (
             <section key={g.day} className="day">
-              <h3 className="day-label">{dayLabel(g.day)}</h3>
+              <h3 className="day-label">
+                {dayLabel(g.day)}
+                <span>
+                  {g.visits.length} {g.visits.length === 1 ? 'visit' : 'visits'}
+                </span>
+              </h3>
               <ul className="timeline">
                 {g.visits.map((v) => {
                   const place = byId.get(v.placeId)!
                   return (
                     <Stagger key={v.id} index={i++} className="timeline-item">
-                      <span className="timeline-time">{timeOfDay(v.arrivedAt)}</span>
                       <span className="timeline-node" style={{ background: place.level.color }} />
                       <div
                         className="timeline-card"
@@ -181,23 +185,35 @@ export default function JournalPanel({ visits, places, period, onPeriod, onHeatm
                         onClick={() => onVisit(v.id)}
                         onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onVisit(v.id))}
                       >
-                        <IconTile icon={categoryIcon(place.category)} color={place.level.color} size={34} />
-                        <span className="row-text">
-                          <strong>{place.name}</strong>
-                          <small>
-                            {v.source === 'auto' ? 'Auto-detected' : 'Checked in'}
-                            {v.leftAt ? ` · ${duration(v.leftAt - v.arrivedAt)}` : ''}
-                            {v.steps ? ` · ${fmtSteps(v.steps)} steps` : ''}
-                          </small>
-                          {v.note && <span className="timeline-note">“{v.note}”</span>}
-                          {thumbs.get(v.id) && (
-                            <PhotoStrip items={thumbs.get(v.id)!} onOpen={(index) => setViewing({ visitId: v.id, index })} />
-                          )}
-                        </span>
+                        <div className="timeline-head">
+                          <IconTile icon={categoryIcon(place.category)} color={place.level.color} size={36} />
+                          <span className="row-text">
+                            <strong>{place.name}</strong>
+                            <small>
+                              {v.source === 'auto' ? 'Auto-detected' : 'Checked in'}
+                              {v.leftAt ? ` · ${duration(v.leftAt - v.arrivedAt)}` : ''}
+                              {v.steps ? ` · ${fmtSteps(v.steps)} steps` : ''}
+                            </small>
+                          </span>
+                          <time className="timeline-time" dateTime={new Date(v.arrivedAt).toISOString()}>
+                            {timeOfDay(v.arrivedAt)}
+                          </time>
+                          <button
+                            className="timeline-delete"
+                            aria-label="Delete visit"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void remove(v, place.name)
+                            }}
+                          >
+                            <X size={14} strokeWidth={2.4} />
+                          </button>
+                        </div>
+                        {v.note && <p className="timeline-note">“{v.note}”</p>}
+                        {thumbs.get(v.id) && (
+                          <PhotoStrip items={thumbs.get(v.id)!} onOpen={(index) => setViewing({ visitId: v.id, index })} />
+                        )}
                       </div>
-                      <button className="timeline-delete" aria-label="Delete visit" onClick={() => remove(v, place.name)}>
-                        <X size={14} strokeWidth={2.4} />
-                      </button>
                     </Stagger>
                   )
                 })}

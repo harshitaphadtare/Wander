@@ -2,8 +2,9 @@ import type { PlaceWithStats } from '../hooks/useData'
 import { aiRank } from './ai'
 import { notifyLocalChange } from './changes'
 import { db, type Pick, type PickItem } from './db'
-import { explore, prettyKind, tasteProfile } from './explore'
+import { explore, prettyKind, tasteProfile, type TilePois } from './explore'
 import { distanceM, formatDistance, type LatLng } from './geo'
+import { withTimeout } from './net'
 import { nearbyAreas, type PhotonArea } from './photon'
 import { weekStart } from './streak'
 
@@ -74,7 +75,7 @@ async function areas(at: LatLng, radiusKm: number, kinds: string[], signal?: Abo
   } catch {
     /* ignore a corrupt cache entry */
   }
-  const list = await nearbyAreas(at, radiusKm, kinds, signal)
+  const list = await withTimeout(8_000, signal, (s) => nearbyAreas(at, radiusKm, kinds, s))
   try {
     if (list.length) localStorage.setItem(key, JSON.stringify({ at: Date.now(), list }))
   } catch {
@@ -96,20 +97,33 @@ function unexplored(list: Area[], places: PlaceWithStats[], at: LatLng, seed: nu
 }
 
 async function aiPickOne(mood: string, list: { id: string; name: string; kind: string; d: number }[], places: PlaceWithStats[], signal?: AbortSignal) {
-  return aiRank(
-    {
-      mood,
-      taste: tasteProfile(places),
-      count: 1,
-      candidates: list.map((c) => ({ id: c.id, name: c.name, category: c.kind, distance: formatDistance(c.d), visits: 0 })),
-    },
-    signal,
-  )
+  // Capped: a slow AI answer falls back to Wander's own choice rather than holding the card up.
+  return withTimeout(5_000, signal, (s) =>
+    aiRank(
+      {
+        mood,
+        taste: tasteProfile(places),
+        count: 1,
+        candidates: list.map((c) => ({ id: c.id, name: c.name, category: c.kind, distance: formatDistance(c.d), visits: 0 })),
+      },
+      s,
+    ),
+  ).catch((err) => {
+    if (signal?.aborted) throw err
+    return null
+  })
 }
 
-export async function makePick(period: PickPeriod, at: LatLng, places: PlaceWithStats[], seed = 0, signal?: AbortSignal): Promise<Pick> {
+export async function makePick(
+  period: PickPeriod,
+  at: LatLng,
+  places: PlaceWithStats[],
+  seed = 0,
+  signal?: AbortSignal,
+  tiles?: TilePois,
+): Promise<Pick> {
   if (period === 'week') {
-    const r = await explore({ mood: 'new', at, time: 120, reach: 4000, places, seed, useAi: true, signal })
+    const r = await explore({ mood: 'new', at, time: 120, reach: 4000, places, seed, useAi: true, signal, tiles })
     const top = r.ai ? r.picks : r.pool.slice(0, 3)
     const items = top.slice(0, 3).map((p) => ({
       name: p.name,

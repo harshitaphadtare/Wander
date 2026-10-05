@@ -1,4 +1,4 @@
-import type { LatLng } from './geo'
+import { distanceM, type LatLng } from './geo'
 
 /**
  * Walking routes.
@@ -16,6 +16,8 @@ export interface Route {
   coords: [number, number][]
   distanceM: number
   durationS: number
+  /** metres between where the route ends and the real destination, when the very end isn't on mapped paths */
+  endGapM?: number
 }
 
 export class RoutingError extends Error {}
@@ -42,8 +44,46 @@ export async function walkingRoute(points: LatLng[], signal?: AbortSignal): Prom
   } else {
     route = await viaOsrm(points, signal)
   }
+  route = await unlessDetour(points, route, signal)
   cache.set(key, route)
   return route
+}
+
+/**
+ * Some destinations sit on paths the router can't reach the right way (a pier
+ * under repair, a fenced park), and it sends you on an absurd detour: 18 km to
+ * St Kilda Pier from the CBD instead of 6. When a route is far longer than the
+ * straight line, also try ending a little short of the destination, on its
+ * near side, and keep that if it's much shorter.
+ */
+async function unlessDetour(points: LatLng[], route: Route, signal?: AbortSignal): Promise<Route> {
+  const end = points[points.length - 1]
+  const prev = points[points.length - 2]
+  const straight = points.slice(1).reduce((sum, p, i) => sum + distanceM(points[i], p), 0)
+  if (route.distanceM < straight * 2 + 800) return route
+  const toward = (Math.atan2((prev.lng - end.lng) * Math.cos((end.lat * Math.PI) / 180), prev.lat - end.lat) * 180) / Math.PI
+  const tries = [150, 350].flatMap((m) => [-45, 0, 45].map((turn) => offset(end, m, toward + turn)))
+  const found = await Promise.all(
+    tries.map((near) =>
+      (API_URL ? viaWorker([...points.slice(0, -1), near], signal) : viaOsrm([...points.slice(0, -1), near], signal)).then(
+        (r) => ({ r, gap: distanceM(near, end) }),
+        () => null,
+      ),
+    ),
+  )
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+  const best = found
+    .filter((x): x is { r: Route; gap: number } => !!x)
+    .sort((a, b) => a.r.distanceM + a.gap - (b.r.distanceM + b.gap))[0]
+  if (!best || best.r.distanceM + best.gap > route.distanceM * 0.7) return route
+  // Finish the line to the real spot so the map still points at it.
+  const extraS = best.gap / 1.33
+  return {
+    coords: [...best.r.coords, [end.lng, end.lat]],
+    distanceM: best.r.distanceM + best.gap,
+    durationS: best.r.durationS + extraS,
+    endGapM: Math.round(best.gap),
+  }
 }
 
 async function viaWorker(points: LatLng[], signal?: AbortSignal): Promise<Route> {

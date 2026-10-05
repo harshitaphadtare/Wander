@@ -99,7 +99,12 @@ export default function WrappedSheet({ visits, places, walks, streakWeeks, initi
           <div className="wrapped-grid">
             <Stat value={w.visits} label="check-ins" delay={0.05} />
             <Stat value={w.places} label="places" delay={0.1} />
-            <Stat value={w.walkedKm} label="km walked" delay={0.15} decimals />
+            {/* Planned walks if there were any, else the steps you logged, else nothing to brag about yet. */}
+            {w.walkedKm >= 0.1 || !w.steps ? (
+              <Stat value={w.walkedKm} label="km walked" delay={0.15} decimals />
+            ) : (
+              <Stat value={w.steps} label="steps" delay={0.15} compact />
+            )}
             <Stat value={w.streakWeeks} label="week streak" delay={0.2} />
           </div>
 
@@ -154,10 +159,18 @@ export default function WrappedSheet({ visits, places, walks, streakWeeks, initi
   )
 }
 
-function Stat({ value, label, delay, decimals }: { value: number; label: string; delay: number; decimals?: boolean }) {
+function Stat({ value, label, delay, decimals, compact }: { value: number; label: string; delay: number; decimals?: boolean; compact?: boolean }) {
   return (
     <motion.div className="wrapped-stat" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}>
-      <strong className="display num">{decimals ? value.toFixed(value < 10 ? 1 : 0) : <CountUp value={value} />}</strong>
+      <strong className="display num">
+        {compact && value >= 1000 ? (
+          `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}k`
+        ) : decimals ? (
+          value.toFixed(value < 10 ? 1 : 0)
+        ) : (
+          <CountUp value={value} />
+        )}
+      </strong>
       <small>{label}</small>
     </motion.div>
   )

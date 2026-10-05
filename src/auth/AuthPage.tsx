@@ -1,8 +1,8 @@
-import { ArrowLeft, BookOpen, Compass, Lock } from 'lucide-react'
+import { BookOpen, Compass, Lock } from 'lucide-react'
 import { motion } from 'motion/react'
 import HeroMap from '../landing/HeroMap'
 import { linkProps } from '../lib/router'
-import { LogoMark } from '../ui/Logo'
+import { AppIcon } from '../ui/Logo'
 import './auth.css'
 import AuthPanel, { type AuthView } from './AuthPanel'
 
@@ -14,28 +14,37 @@ const POINTS = [
   { icon: Lock, text: 'Encrypted on your phone before it syncs' },
 ]
 
-/** /login and /signup: full-screen on phones, split with a brand panel on wide screens. */
+/**
+ * /login and /signup. The split-screen pattern from shadcn/ui's login-02 block:
+ * logo pinned top-left, a narrow form centred in the left column, fine print at
+ * the bottom, and a full-bleed visual on the right (wide screens only).
+ */
 export default function AuthPage({ view, standalone }: { view: AuthView; standalone: boolean }) {
   return (
     <div className="auth-page">
-      <aside className="auth-aside" aria-hidden>
-        <div className="auth-aside-glow" />
-        <a className="auth-aside-logo" {...linkProps('/')}>
-          <LogoMark size={22} />
+      <main className="auth-main">
+        <a className="auth-logo-link" {...(standalone ? {} : linkProps('/'))} aria-label="Wander home">
+          <AppIcon size={28} />
           <span className="display">Wander</span>
         </a>
-        <motion.div className="auth-aside-phone" initial={{ opacity: 0, y: 40, rotate: 3 }} animate={{ opacity: 1, y: 0, rotate: -4 }} transition={{ duration: 1.1, ease }}>
-          <HeroMap />
+
+        <motion.div className="auth-column" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease }}>
+          <AuthPanel initial={view} />
         </motion.div>
-        <div className="auth-aside-copy">
-          <h2 className="display">
-            Your city,
-            <br />
-            <em>remembered.</em>
-          </h2>
+
+        <p className="auth-legal">We never sell or share your data. Photos stay on your phone.</p>
+      </main>
+
+      <aside className="auth-visual" aria-hidden>
+        <HeroMap panel />
+        <div className="auth-visual-shade" />
+        <div className="auth-visual-copy">
+          <motion.h2 className="display" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2, duration: 0.7, ease }}>
+            Your city, <em>remembered.</em>
+          </motion.h2>
           <ul>
             {POINTS.map(({ icon: Icon, text }, i) => (
-              <motion.li key={text} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.4 + i * 0.1, duration: 0.6, ease }}>
+              <motion.li key={text} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 + i * 0.08, duration: 0.6, ease }}>
                 <Icon size={16} strokeWidth={2.3} />
                 {text}
               </motion.li>
@@ -43,20 +52,6 @@ export default function AuthPage({ view, standalone }: { view: AuthView; standal
           </ul>
         </div>
       </aside>
-
-      <main className="auth-main">
-        <div className="auth-page-glow" aria-hidden />
-        {!standalone && (
-          <a className="auth-home" {...linkProps('/')}>
-            <ArrowLeft size={17} strokeWidth={2.4} />
-            <span>Home</span>
-          </a>
-        )}
-        <motion.div className="auth-card" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55, ease }}>
-          <AuthPanel initial={view} />
-        </motion.div>
-        <p className="auth-legal">By continuing you agree to use Wander kindly. We never sell or share your data.</p>
-      </main>
     </div>
   )
 }

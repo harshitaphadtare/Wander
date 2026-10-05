@@ -3,9 +3,10 @@
    Builds on the tokens and primitives in index.css.
    ========================================================= */
 
-/* ---------- Full screen in the installed iPhone app ----------
-   --app-h is set by Root.tsx only in the installed app, where iOS can report a
-   viewport shorter than the screen (the "gap at the bottom"). */
+/* ---------- Full screen ----------
+   Sized to the area the browser actually draws (100dvh). The iOS 26 home-screen
+   "strip at the bottom" is handled in index.css; never size past 100dvh, or iOS
+   clips the overflow (that cut the dock off). */
 .app {
   inset: 0 0 auto 0;
   height: var(--app-h, 100dvh);

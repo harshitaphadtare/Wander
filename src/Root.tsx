@@ -13,24 +13,11 @@ const isStandalone =
   matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true
 
 /**
- * iOS home-screen apps with a translucent status bar sometimes report a
- * viewport one status-bar shorter than the screen, so `100dvh` / `inset: 0`
- * stop short and leave a strip of background at the bottom. In the installed
- * app the page always fills the screen, so size to the screen itself.
+ * Full-screen containers size to the area iOS actually draws (100dvh), never
+ * to screen.height: in the iOS 26 home-screen app the drawable area can be one
+ * status bar shorter than the screen, and anything taller is clipped (that cut
+ * the dock off). The gap itself is fixed in index.css (standalone html height).
  */
-function fitStandaloneViewport() {
-  if (!isStandalone || !/iPhone|iPad|iPod/.test(navigator.userAgent)) return
-  const apply = () => {
-    const landscape = matchMedia('(orientation: landscape)').matches
-    const full = landscape ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height)
-    // Never shrink below what the browser reports (e.g. once Apple fixes it).
-    document.documentElement.style.setProperty('--app-h', `${Math.max(full, window.innerHeight)}px`)
-  }
-  apply()
-  window.addEventListener('resize', apply)
-  window.addEventListener('orientationchange', () => setTimeout(apply, 300))
-}
-fitStandaloneViewport()
 
 /**
  * Full-screen containers must never scroll. Browsers still scroll an

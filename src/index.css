@@ -73,6 +73,18 @@ body,
   overscroll-behavior: none;
 }
 
+/*
+ * iOS home-screen apps with a translucent status bar (iOS 26) lay the page out
+ * one status-bar shorter than the screen and draw nothing below that, leaving
+ * an empty strip at the bottom. Making the page taller by exactly that much
+ * pushes the drawable area down to the real bottom edge.
+ */
+@media (display-mode: standalone) {
+  html {
+    min-height: calc(100% + env(safe-area-inset-top));
+  }
+}
+
 body {
   background: var(--bg);
   -webkit-tap-highlight-color: transparent;

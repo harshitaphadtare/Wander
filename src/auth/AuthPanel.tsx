@@ -1,11 +1,9 @@
-import { ArrowLeft, ArrowRight, Lock, LockKeyhole, Mail, MailCheck, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, MailCheck, ShieldCheck } from 'lucide-react'
 import { AnimatePresence, motion, useAnimationControls } from 'motion/react'
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { authEnabled, resendConfirmation, sendPasswordReset, signIn, signInWithGoogle, signUp } from '../lib/auth'
 import { strength as rate } from '../lib/password'
-import { Segmented } from '../ui/bits'
 import { navigate } from '../lib/router'
-import { AppIcon } from '../ui/Logo'
 import { Field, GoogleIcon, Spinner, StrengthMeter, useBreachCheck } from './fields'
 
 export type AuthView = 'signin' | 'signup' | 'forgot' | 'reset-sent' | 'confirm-sent'
@@ -15,11 +13,30 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 const RESEND_SECONDS = 60
 
 const TITLES: Record<AuthView, [string, string]> = {
-  signin: ['Welcome back', 'Sign in to pick up where you left off.'],
-  signup: ['Start wandering', 'One account keeps your phone and laptop in sync.'],
+  signin: ['Welcome back', 'Sign in to your map.'],
+  signup: ['Create your account', 'Free, and it keeps your phone and laptop in sync.'],
   forgot: ['Reset your password', 'We’ll email you a link to choose a new one.'],
   'reset-sent': ['Check your inbox', ''],
   'confirm-sent': ['Confirm your email', ''],
+}
+
+/** Remember how you signed in last time and point at it (a small kindness for return visits). */
+const LAST_KEY = 'wander:last-auth'
+type Method = 'google' | 'email'
+function readLast(): Method | null {
+  try {
+    const v = localStorage.getItem(LAST_KEY)
+    return v === 'google' || v === 'email' ? v : null
+  } catch {
+    return null
+  }
+}
+function rememberLast(m: Method) {
+  try {
+    localStorage.setItem(LAST_KEY, m)
+  } catch {
+    /* private mode */
+  }
 }
 
 function useCooldown() {
@@ -49,6 +66,7 @@ export default function AuthPanel({ initial = 'signin' }: { initial?: AuthView }
   const [touched, setTouched] = useState(false)
   const shake = useAnimationControls()
   const cooldown = useCooldown()
+  const [last] = useState(readLast)
 
   const creating = view === 'signup'
   const pw = useMemo(() => rate(password, email), [password, email])
@@ -99,13 +117,17 @@ export default function AuthPanel({ initial = 'signin' }: { initial?: AuthView }
     }
     if (view === 'signin') {
       if (!password) return fail('Enter your password.')
-      return void run('form', () => signIn(addr, password))
+      return void run('form', async () => {
+        await signIn(addr, password)
+        rememberLast('email')
+      })
     }
     // sign up
     if (!pw.ok) return fail('Your password needs to meet every requirement below.')
     if (typeof breaches === 'number' && breaches > 0) return fail('That password has appeared in a data breach. Please choose another.')
     if (!matches) return fail('The two passwords don’t match.')
     void run('form', async () => {
+      rememberLast('email')
       if ((await signUp(addr, password)) === 'confirm') {
         cooldown.start()
         setView('confirm-sent')
@@ -116,24 +138,20 @@ export default function AuthPanel({ initial = 'signin' }: { initial?: AuthView }
   const [title, subtitle] = TITLES[view]
   const sent = view === 'reset-sent' || view === 'confirm-sent'
 
+  const lastBadge = (m: Method) => (last === m && view === 'signin' ? <span className="auth-last">Last used</span> : null)
+
   return (
     <motion.div className="auth" animate={shake}>
-      <div className="auth-brand">
-        <span className="auth-logo" aria-hidden>
-          <AppIcon size={56} />
-        </span>
-      </div>
-
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
           key={view}
-          initial={{ opacity: 0, y: 10, filter: 'blur(4px)' }}
-          animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-          exit={{ opacity: 0, y: -8, filter: 'blur(4px)' }}
-          transition={{ duration: 0.28, ease }}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={{ duration: 0.24, ease }}
         >
           <header className="auth-head">
-            <h2 className="display">{title}</h2>
+            <h1>{title}</h1>
             {subtitle && <p>{subtitle}</p>}
           </header>
 
@@ -158,29 +176,23 @@ export default function AuthPanel({ initial = 'signin' }: { initial?: AuthView }
             <>
               {view !== 'forgot' && (
                 <>
-                  <div className="auth-tabs">
-                    <Segmented
-                      id="auth"
-                      options={[
-                        ['signin', 'Sign in'],
-                        ['signup', 'Create account'],
-                      ]}
-                      value={view as 'signin' | 'signup'}
-                      onChange={go}
-                    />
-                  </div>
-                  <motion.button
+                  <button
                     type="button"
                     className="auth-google"
-                    whileTap={{ scale: 0.98 }}
                     disabled={!!busy}
-                    onClick={() => run('google', signInWithGoogle)}
+                    onClick={() =>
+                      run('google', async () => {
+                        rememberLast('google')
+                        await signInWithGoogle()
+                      })
+                    }
                   >
                     {busy === 'google' ? <Spinner /> : <GoogleIcon />}
                     Continue with Google
-                  </motion.button>
+                    {lastBadge('google')}
+                  </button>
                   <div className="auth-or">
-                    <span>or with email</span>
+                    <span>or</span>
                   </div>
                 </>
               )}
@@ -188,20 +200,20 @@ export default function AuthPanel({ initial = 'signin' }: { initial?: AuthView }
               <form className="auth-form" onSubmit={submit} noValidate>
                 <Field
                   label="Email"
-                  icon={Mail}
                   type="email"
                   autoComplete="email"
                   inputMode="email"
+                  placeholder="you@example.com"
                   value={email}
                   onChange={setEmail}
                   invalid={touched && !emailOk}
                   autoFocus={view === 'forgot'}
+                  aside={lastBadge('email')}
                 />
 
                 {view !== 'forgot' && (
                   <Field
                     label="Password"
-                    icon={Lock}
                     type="password"
                     autoComplete={creating ? 'new-password' : 'current-password'}
                     value={password}
@@ -224,7 +236,6 @@ export default function AuthPanel({ initial = 'signin' }: { initial?: AuthView }
                 {creating && (
                   <Field
                     label="Confirm password"
-                    icon={LockKeyhole}
                     type="password"
                     autoComplete="new-password"
                     value={confirm}
@@ -249,34 +260,41 @@ export default function AuthPanel({ initial = 'signin' }: { initial?: AuthView }
                   )}
                 </AnimatePresence>
 
-                <motion.button className="auth-submit" whileTap={{ scale: 0.98 }} disabled={!!busy}>
-                  {busy === 'form' ? (
-                    <Spinner />
-                  ) : (
-                    <>
-                      {view === 'signin' ? 'Sign in' : view === 'signup' ? 'Create account' : 'Send reset link'}
-                      <ArrowRight size={17} strokeWidth={2.4} className="auth-submit-arrow" />
-                    </>
-                  )}
-                </motion.button>
+                <button className="auth-submit" disabled={!!busy}>
+                  {busy === 'form' ? <Spinner /> : view === 'signin' ? 'Sign in' : view === 'signup' ? 'Create account' : 'Send reset link'}
+                </button>
               </form>
 
-              {view === 'forgot' && (
-                <button type="button" className="auth-back" onClick={() => go('signin')}>
-                  <ArrowLeft size={15} /> Back to sign in
-                </button>
-              )}
+              <p className="auth-switch">
+                {view === 'signin' ? (
+                  <>
+                    New to Wander?{' '}
+                    <button type="button" onClick={() => go('signup')}>
+                      Create an account
+                    </button>
+                  </>
+                ) : view === 'signup' ? (
+                  <>
+                    Already have an account?{' '}
+                    <button type="button" onClick={() => go('signin')}>
+                      Sign in
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" onClick={() => go('signin')}>
+                    <ArrowLeft size={14} /> Back to sign in
+                  </button>
+                )}
+              </p>
             </>
           )}
         </motion.div>
       </AnimatePresence>
 
-      <footer className="auth-foot">
-        <p className="auth-secure">
-          <ShieldCheck size={14} />
-          Synced data is encrypted on your device with AES-256 before it’s uploaded.
-        </p>
-      </footer>
+      <p className="auth-secure">
+        <ShieldCheck size={14} />
+        Your synced data is encrypted on this device before it’s uploaded.
+      </p>
     </motion.div>
   )
 }

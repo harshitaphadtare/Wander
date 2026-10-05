@@ -1,4 +1,4 @@
-import { ArrowRight, Check, Lock, LockKeyhole } from 'lucide-react'
+import { ArrowRight, Check } from 'lucide-react'
 import { AnimatePresence, motion, useAnimationControls } from 'motion/react'
 import { useMemo, useState, type FormEvent } from 'react'
 import { finishRecovery, updatePassword, useAuth } from '../lib/auth'
@@ -88,13 +88,13 @@ export default function ResetPassword() {
                 <form className="auth-form" onSubmit={submit} noValidate>
                   {/* Lets password managers save the new password against the right account. */}
                   <input type="email" autoComplete="username" value={email} readOnly hidden />
-                  <Field label="New password" icon={Lock} type="password" autoComplete="new-password" value={password} onChange={setPassword} autoFocus />
+                  <Field label="New password" type="password" autoComplete="new-password" value={password} onChange={setPassword} autoFocus />
                   <AnimatePresence initial={false}>
                     {password && <StrengthMeter key="m" password={password} strength={pw} breaches={breaches} />}
                   </AnimatePresence>
                   <Field
                     label="Confirm new password"
-                    icon={LockKeyhole}
+                   
                     type="password"
                     autoComplete="new-password"
                     value={confirm}

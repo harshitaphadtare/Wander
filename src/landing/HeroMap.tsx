@@ -18,7 +18,8 @@ const PINS = [
 const ROUTE = 'M150 505 C 150 470, 150 455, 166 430 S 196 380, 200 340 S 236 310, 236 300'
 
 /** Illustrated, animated stand-in for the live map inside the hero phone. */
-export default function HeroMap() {
+/** `panel`: no phone UI (search bar, dock); used full-bleed beside the sign-in form. */
+export default function HeroMap({ panel = false }: { panel?: boolean }) {
   const [step, setStep] = useState(0)
   useEffect(() => {
     const t = setInterval(() => setStep((s) => (s + 1) % 3), 3200)
@@ -26,7 +27,7 @@ export default function HeroMap() {
   }, [])
 
   return (
-    <div className="hm">
+    <div className={`hm ${panel ? 'hm-panel' : ''}`}>
       <svg viewBox="0 0 300 600" className="hm-svg" aria-hidden preserveAspectRatio="xMidYMid slice">
         <rect width="300" height="600" fill="#f2efe8" />
         {/* water */}
@@ -88,10 +89,12 @@ export default function HeroMap() {
         </motion.span>
       ))}
 
+      {!panel && (
       <div className="hm-search">
         <span className="hm-search-dot" />
         Search places
       </div>
+      )}
 
       <AnimatePresence mode="wait">
         {step === 0 && (
@@ -129,6 +132,7 @@ export default function HeroMap() {
         )}
       </AnimatePresence>
 
+      {!panel && (
       <div className="hm-dock">
         {['Map', 'Places', 'Journal', 'Settings'].map((t, i) => (
           <span key={t} className={i === 0 ? 'on' : ''}>
@@ -137,6 +141,7 @@ export default function HeroMap() {
           </span>
         ))}
       </div>
+      )}
     </div>
   )
 }

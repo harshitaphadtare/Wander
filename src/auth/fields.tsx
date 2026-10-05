@@ -1,4 +1,4 @@
-import { Check, Eye, EyeOff, ShieldAlert, ShieldCheck, type LucideIcon } from 'lucide-react'
+import { Check, Eye, EyeOff, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useId, useState, type InputHTMLAttributes, type ReactNode } from 'react'
 import { breachCount, RULES, type Strength } from '../lib/password'
@@ -7,7 +7,6 @@ const ease = [0.16, 1, 0.3, 1] as const
 
 type FieldProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange'> & {
   label: string
-  icon: LucideIcon
   value: string
   onChange(v: string): void
   /** Right side of the label row, e.g. a "Forgot password?" link. */
@@ -15,8 +14,8 @@ type FieldProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange'> & {
   invalid?: boolean
 }
 
-/** Input with a floating label that settles above the text once you type. */
-export function Field({ label, icon: Icon, value, onChange, aside, invalid, type = 'text', ...rest }: FieldProps) {
+/** Label above, input below (the shadcn / Linear pattern): easy to scan, works with autofill. */
+export function Field({ label, value, onChange, aside, invalid, type = 'text', ...rest }: FieldProps) {
   const id = useId()
   const [reveal, setReveal] = useState(false)
   const [caps, setCaps] = useState(false)
@@ -24,12 +23,14 @@ export function Field({ label, icon: Icon, value, onChange, aside, invalid, type
 
   return (
     <div className="af">
+      <div className="af-label">
+        <label htmlFor={id}>{label}</label>
+        {aside}
+      </div>
       <div className={`af-box ${invalid ? 'invalid' : ''}`}>
-        <Icon className="af-icon" size={17} strokeWidth={2} aria-hidden />
         <input
           id={id}
           type={isPassword && reveal ? 'text' : type}
-          placeholder=" "
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyUp={(e) => isPassword && setCaps(e.getModifierState('CapsLock'))}
@@ -39,7 +40,6 @@ export function Field({ label, icon: Icon, value, onChange, aside, invalid, type
           autoCapitalize="off"
           {...rest}
         />
-        <label htmlFor={id}>{label}</label>
         {isPassword && (
           <button
             type="button"
@@ -48,32 +48,21 @@ export function Field({ label, icon: Icon, value, onChange, aside, invalid, type
             aria-label={reveal ? 'Hide password' : 'Show password'}
             aria-pressed={reveal}
           >
-            <AnimatePresence mode="popLayout" initial={false}>
-              <motion.span
-                key={reveal ? 'off' : 'on'}
-                initial={{ opacity: 0, scale: 0.6, rotate: -20 }}
-                animate={{ opacity: 1, scale: 1, rotate: 0 }}
-                exit={{ opacity: 0, scale: 0.6, rotate: 20 }}
-                transition={{ duration: 0.18 }}
-              >
-                {reveal ? <EyeOff size={17} /> : <Eye size={17} />}
-              </motion.span>
-            </AnimatePresence>
+            {reveal ? <EyeOff size={16} /> : <Eye size={16} />}
           </button>
         )}
       </div>
       <AnimatePresence initial={false}>
-        {(aside || caps) && (
-          <motion.div
-            className="af-aside"
+        {caps && (
+          <motion.p
+            className="af-caps"
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.22, ease }}
+            transition={{ duration: 0.2, ease }}
           >
-            <span className="af-caps">{caps ? 'Caps Lock is on' : ''}</span>
-            {aside}
-          </motion.div>
+            Caps Lock is on
+          </motion.p>
         )}
       </AnimatePresence>
     </div>

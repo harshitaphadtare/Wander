@@ -28,6 +28,9 @@ export default function ListChips({ placeId, listIds, lists }: { placeId: string
   return (
     <section>
       <div className="list-label">Lists</div>
+      {on.size === 0 && (
+        <p className="lists-hint">Your own collections, like “Rainy day” or “Date spots”. Tap one to add this place; open them from Places.</p>
+      )}
       <div className="chips wrap">
         {lists.map((l) => {
           const active = on.has(l.id)

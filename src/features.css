@@ -1547,3 +1547,10 @@ a.btn.primary {
   line-height: 1.4;
   color: var(--ink-3);
 }
+
+.lists-hint {
+  margin: -2px 2px 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}

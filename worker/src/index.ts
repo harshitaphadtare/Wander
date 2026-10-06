@@ -217,15 +217,28 @@ async function ai(req: Request, env: Env, cors: Record<string, string>): Promise
   const built = body.task === 'rank' ? rankPrompt(data) : body.task === 'wrapped' ? wrappedPrompt(data) : null
   if (!built) return json({ error: 'Unknown task' }, 400, cors)
 
-  const model = env.GEMINI_MODEL || 'gemini-flash-latest'
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: built.prompt }] }],
-      generationConfig: { responseMimeType: 'application/json', responseSchema: built.schema, temperature: 0.7, maxOutputTokens: 600 },
-    }),
-  })
+  // Flash-Lite: the biggest free quota and the fastest answers, which matters because
+  // the app only waits a few seconds before keeping its own picks.
+  const model = env.GEMINI_MODEL || 'gemini-flash-lite-latest'
+  const call = (thinking: boolean) =>
+    fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY! },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: built.prompt }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: built.schema,
+          temperature: 0.7,
+          maxOutputTokens: 600,
+          // No "thinking": it's slow and its tokens count against maxOutputTokens, which cut answers off mid-JSON.
+          ...(thinking ? {} : { thinkingConfig: { thinkingBudget: 0 } }),
+        },
+      }),
+    })
+  let res = await call(false)
+  if (res.status === 400) res = await call(true) // a model that doesn't accept the thinking setting
+  if (res.status === 404) return json({ error: `Unknown Gemini model "${model}"` }, 502, cors)
   if (res.status === 429) return json({ error: 'AI quota used up for now' }, 429, cors)
   if (!res.ok) return json({ error: `AI failed (${res.status})` }, 502, cors)
   const out = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] }

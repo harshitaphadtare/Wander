@@ -138,6 +138,11 @@ function toCandidate(el: OverpassElement): Candidate | null {
   }
 }
 
+function offsetPoint(at: LatLng, m: number, deg: number): LatLng {
+  const rad = (deg * Math.PI) / 180
+  return { lat: at.lat + (m * Math.cos(rad)) / 111_320, lng: at.lng + (m * Math.sin(rad)) / (111_320 * Math.cos((at.lat * Math.PI) / 180)) }
+}
+
 /** Reads named POIs out of the map tiles already on the phone: instant and offline, but no hours or cuisine. */
 export type TilePois = (at: LatLng, radiusM: number, classes: string[]) => { osmId: string; name: string; lat: number; lng: number; category: string }[]
 
@@ -157,7 +162,7 @@ const TILE_KEEP: Partial<Record<Exclude<Mood, 'stroll' | 'surprise'>, Set<string
 const cache = new Map<string, { at: number; list: Candidate[] }>()
 const CACHE_MS = 10 * 60_000
 /** OSM places barely change: a full Overpass answer is kept on the phone for a day, a quick one for an hour. */
-const STORE_KEY = 'wander:explore-cache'
+const STORE_KEY = 'wander:explore-cache-v2' // v2: wide searches sample the whole radius
 const STORE_MS = { rich: 24 * 3_600_000, quick: 3_600_000 }
 const STORE_MAX = 24
 
@@ -179,6 +184,7 @@ function writeStore(key: string, list: Candidate[], rich: boolean) {
       .sort((a, b) => b[1].at - a[1].at)
       .slice(0, STORE_MAX)
     localStorage.setItem(STORE_KEY, JSON.stringify(Object.fromEntries(keep)))
+    localStorage.removeItem('wander:explore-cache') // the v1 cache, superseded
   } catch {
     /* storage full or blocked: the in-memory cache still works */
   }
@@ -237,7 +243,14 @@ async function candidates(
   fromOverpass.catch(() => {}) // a late failure is fine
 
   const fromPhoton = withTimeout(8_000, signal, async (s) => {
-    const found = await nearbyByTags(at, radiusM / 1000, mood.flatMap((m) => PHOTON_TAGS[m]), s)
+    // Photon returns the 50 nearest, which for a big radius are all on your doorstep.
+    // So also sample four points out in the radius, one per compass direction.
+    const tags = mood.flatMap((m) => PHOTON_TAGS[m])
+    const centres = radiusM >= 4000 ? [at, ...[0, 90, 180, 270].map((deg) => offsetPoint(at, radiusM * 0.6, deg))] : [at]
+    const each = radiusM >= 4000 ? radiusM / 2500 : radiusM / 1000
+    const found = (await Promise.allSettled(centres.map((c) => nearbyByTags(c, each, tags, s))))
+      .flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
+      .filter((p) => distanceM(at, p) <= radiusM)
     const list = found.map(
       (p): Candidate => ({
         id: p.osmId ?? `${p.name}|${p.lat.toFixed(4)}|${p.lng.toFixed(4)}`,
@@ -269,14 +282,15 @@ async function candidates(
 
   // 1. Overpass, if it's quick. When the map already shows plenty nearby, don't wait as long.
   const local = fromTiles()
-  const grace = local.length >= 8 ? OVERPASS_GRACE_MS / 2 : OVERPASS_GRACE_MS
+  const grace = radiusM >= 4000 ? OVERPASS_GRACE_MS * 1.6 : local.length >= 8 ? OVERPASS_GRACE_MS / 2 : OVERPASS_GRACE_MS
   const quick = await abortable(within(fromOverpass, grace), signal)
   if (quick?.length) return quick
 
   // 2. Otherwise whatever is in hand: Photon if it has answered, plus the map's own tiles.
   const photonNow = await within(fromPhoton, 0)
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-  if (photonNow?.length || local.length >= 6) return remember(dedupe([...(photonNow ?? []), ...local]), false)
+  // The tiles only cover what's on screen, so they can't stand in alone for a wide search.
+  if (photonNow?.length || (local.length >= 6 && radiusM < 4000)) return remember(dedupe([...(photonNow ?? []), ...local]), false)
 
   // 3. Wait for the first network answer, up to the deadline; fall back to the tiles.
   const first = await abortable(within(Promise.any([fromOverpass, fromPhoton]), DEADLINE_MS - grace), signal)
@@ -394,6 +408,9 @@ interface Options {
   signal?: AbortSignal
 }
 
+/** Picking a bigger radius means "further than last time": places inside this are pushed down. */
+const NEAR_BAND: Record<Reach, number> = { 1500: 0, 4000: 1500, 10000: 4000, 30000: 10000 }
+
 const STROLL_M: Record<TimeBudget, number> = { 30: 2200, 60: 4400, 120: 8000, 240: 12000 }
 
 export async function explore(o: Options): Promise<ExploreResult> {
@@ -448,7 +465,11 @@ export async function explore(o: Options): Promise<ExploreResult> {
 
     let score = 0
     score += visits === 0 ? 3 : -Math.min(visits, 5) * 0.4 + (mood === 'coffee' ? 2 : 0)
-    score -= (d / radius) * (mood === 'coffee' ? 4 : 2)
+    // Distance: coffee and walkable searches want close; a bigger radius means you asked to go
+    // further, so aim for the outer band (past the previous option) instead of the nearest spots.
+    const band = mood === 'coffee' || mood === 'hike' ? 0 : NEAR_BAND[o.reach]
+    if (band) score -= d < band ? 2.5 * (1 - d / band) + 1 : Math.abs(d - (band + radius) / 2) / radius
+    else score -= (d / radius) * (mood === 'coffee' ? 4 : 2)
     if (mood === 'new' || mood === 'surprise') score += rarity
     if (ctx.rainy) score += INDOOR.has(c.category) ? 2 : OUTDOOR.has(c.category) ? -2 : 0
     else if (OUTDOOR.has(c.category)) score += 0.5
@@ -485,13 +506,13 @@ export async function explore(o: Options): Promise<ExploreResult> {
 
 /**
  * Let Gemini choose and explain from the real candidates. Optional and capped at
- * a few seconds: callers show the rule-based picks first and swap these in if they arrive.
+ * about 8 seconds: callers show the rule-based picks first and swap these in if they arrive.
  */
 export async function aiPicks(r: ExploreResult, mood: Mood, places: PlaceWithStats[], signal?: AbortSignal): Promise<ExplorePick[] | null> {
   if (r.pool.length < 2 || mood === 'stroll') return null
   const count = mood === 'surprise' ? 1 : 4
   const top = r.pool.slice(0, 15)
-  const ranked = await withTimeout(5_000, signal, (s) =>
+  const ranked = await withTimeout(8_000, signal, (s) =>
     aiRank(
       {
         mood,

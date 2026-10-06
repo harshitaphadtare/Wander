@@ -98,7 +98,7 @@ function unexplored(list: Area[], places: PlaceWithStats[], at: LatLng, seed: nu
 
 async function aiPickOne(mood: string, list: { id: string; name: string; kind: string; d: number }[], places: PlaceWithStats[], signal?: AbortSignal) {
   // Capped: a slow AI answer falls back to Wander's own choice rather than holding the card up.
-  return withTimeout(5_000, signal, (s) =>
+  return withTimeout(8_000, signal, (s) =>
     aiRank(
       {
         mood,

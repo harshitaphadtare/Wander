@@ -16,7 +16,12 @@ function useActiveSlide(rail: React.RefObject<HTMLDivElement | null>) {
   const onScroll = () => {
     const el = rail.current
     if (!el) return
-    setIndex(Math.round(el.scrollLeft / Math.max(1, el.clientWidth)))
+    // One step is a slide plus its gap, not the rail's width: in the carousel the next
+    // photo peeks in, so dividing by the width undercounted and the last photos never showed as current.
+    const [a, b] = [el.children[0] as HTMLElement | undefined, el.children[1] as HTMLElement | undefined]
+    const step = a && b ? b.offsetLeft - a.offsetLeft : el.clientWidth
+    const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 2
+    setIndex(atEnd ? el.children.length - 1 : Math.round(el.scrollLeft / Math.max(1, step)))
   }
   return [index, onScroll] as const
 }

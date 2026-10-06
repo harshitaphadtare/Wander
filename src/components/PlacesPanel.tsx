@@ -8,12 +8,17 @@ import { distanceM, formatDistance, type LatLng } from '../lib/geo'
 import { LEVELS } from '../lib/levels'
 import { createList, deleteList, renameList } from '../lib/places'
 import { useConfirm } from '../ui/Confirm'
-import { EmptyState, IconTile, Segmented, Stagger } from '../ui/bits'
+import { EmptyState, IconTile, Stagger } from '../ui/bits'
 import { categoryIcon, LEVEL_ICONS } from '../ui/icons'
 
 type Filter = 'all' | 'favourites' | 'unvisited'
 type Sort = 'visits' | 'recent' | 'nearest' | 'name'
 
+const FILTERS: [Filter, string][] = [
+  ['all', 'All'],
+  ['favourites', 'Favourites'],
+  ['unvisited', 'Want to go'],
+]
 const SORT_LABEL: Record<Sort, string> = { visits: 'Most visited', recent: 'Recent', nearest: 'Nearest', name: 'A–Z' }
 
 interface Props {
@@ -53,26 +58,30 @@ export default function PlacesBody({ places, lists, from, onPick }: Props) {
   return (
     <>
       {places.length > 0 && (
-        <Segmented<Filter>
-          id="places-filter"
-          value={filter}
-          onChange={setFilter}
-          options={[
-            ['all', 'All'],
-            ['favourites', 'Favourites'],
-            ['unvisited', 'Want to go'],
-          ]}
-        />
-      )}
-
-      {places.length > 0 && (
+        // One row: what to show (all, favourites, want to go, or one of your lists).
         <div className="places-bar">
           <div className="chips scroll list-filter">
-            <button className={`chip ${!activeList ? 'is-on solid' : ''}`} onClick={() => setListId(null)}>
-              All places
-            </button>
+            {FILTERS.map(([key, label]) => (
+              <button
+                key={key}
+                className={`chip ${!activeList && filter === key ? 'is-on solid' : ''}`}
+                onClick={() => {
+                  setFilter(key)
+                  setListId(null)
+                }}
+              >
+                {label}
+              </button>
+            ))}
             {lists.map((l) => (
-              <button key={l.id} className={`chip ${l.id === listId ? 'is-on solid' : ''}`} onClick={() => setListId(l.id === listId ? null : l.id)}>
+              <button
+                key={l.id}
+                className={`chip ${l.id === listId ? 'is-on solid' : ''}`}
+                onClick={() => {
+                  setFilter('all')
+                  setListId(l.id === listId ? null : l.id)
+                }}
+              >
                 {l.name}
                 <em>{places.filter((p) => p.listIds?.includes(l.id)).length}</em>
               </button>
@@ -81,21 +90,14 @@ export default function PlacesBody({ places, lists, from, onPick }: Props) {
               className="chip ghost"
               onClick={async () => {
                 const list = await createList(`List ${lists.length + 1}`)
+                setFilter('all')
                 setListId(list.id)
                 setRenaming(list.name)
               }}
             >
-              <ListPlus size={14} strokeWidth={2.4} /> New list
+              <ListPlus size={14} strokeWidth={2.4} /> List
             </button>
           </div>
-          <motion.button className="sort-pill" onClick={cycleSort} whileTap={{ scale: 0.94 }} aria-label={`Sort: ${SORT_LABEL[sort]}. Tap to change.`}>
-            <ArrowUpDown size={14} strokeWidth={2.4} />
-            <AnimatePresence mode="popLayout" initial={false}>
-              <motion.span key={sort} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.16 }}>
-                {SORT_LABEL[sort]}
-              </motion.span>
-            </AnimatePresence>
-          </motion.button>
         </div>
       )}
 
@@ -168,24 +170,38 @@ export default function PlacesBody({ places, lists, from, onPick }: Props) {
           </EmptyState>
         )
       ) : (
-        <ul className="rows" key={`${filter}-${sort}-${listId}`}>
-          {list.map((p, i) => (
-            <Stagger key={p.id} index={i}>
-              <button className="row" onClick={() => onPick(p)}>
-                <IconTile icon={categoryIcon(p.category)} color={p.level.color} />
-                <span className="row-text">
-                  <strong>{p.name}</strong>
-                  <small>
-                    {p.level.label} · {plural(p.visitCount, 'visit')}
-                    {p.lastVisitAt ? ` · ${relativeTime(p.lastVisitAt)}` : ''}
-                  </small>
-                </span>
-                {from && <span className="row-meta">{formatDistance(distanceM(from, p))}</span>}
-                <ChevronRight size={16} className="row-chev" />
-              </button>
-            </Stagger>
-          ))}
-        </ul>
+        <>
+          {/* "5 places · ⇅ Most visited": sorting without another row of pills. */}
+          <div className="sort-line">
+            <span>{plural(list.length, 'place')}</span>
+            <motion.button onClick={cycleSort} whileTap={{ scale: 0.94 }} aria-label={`Sorted by ${SORT_LABEL[sort]}. Tap to change.`}>
+              <ArrowUpDown size={13} strokeWidth={2.4} />
+              <AnimatePresence mode="popLayout" initial={false}>
+                <motion.span key={sort} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.16 }}>
+                  {SORT_LABEL[sort]}
+                </motion.span>
+              </AnimatePresence>
+            </motion.button>
+          </div>
+          <ul className="rows" key={`${filter}-${sort}-${listId}`}>
+            {list.map((p, i) => (
+              <Stagger key={p.id} index={i}>
+                <button className="row" onClick={() => onPick(p)}>
+                  <IconTile icon={categoryIcon(p.category)} color={p.level.color} />
+                  <span className="row-text">
+                    <strong>{p.name}</strong>
+                    <small>
+                      {p.level.label} · {plural(p.visitCount, 'visit')}
+                      {p.lastVisitAt ? ` · ${relativeTime(p.lastVisitAt)}` : ''}
+                    </small>
+                  </span>
+                  {from && <span className="row-meta">{formatDistance(distanceM(from, p))}</span>}
+                  <ChevronRight size={16} className="row-chev" />
+                </button>
+              </Stagger>
+            ))}
+          </ul>
+        </>
       )}
 
       <section className="levels-card">

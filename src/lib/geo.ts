@@ -12,7 +12,8 @@ export function distanceM(a: LatLng, b: LatLng): number {
 
 export function formatDistance(m: number): string {
   if (m < 1000) return `${Math.round(m / 10) * 10} m`
-  return `${(m / 1000).toFixed(m < 10_000 ? 1 : 0)} km`
+  if (m < 10_000) return `${(m / 1000).toFixed(1)} km`
+  return `${Math.round(m / 1000).toLocaleString('en')} km`
 }
 
 export function getCurrentPosition(timeoutMs = 15_000): Promise<GeolocationPosition> {

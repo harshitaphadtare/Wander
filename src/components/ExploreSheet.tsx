@@ -131,12 +131,14 @@ interface Props {
   onFocus(at: LatLng): void
   onWalk(pick: { name: string; lat: number; lng: number; osmId?: string; category?: string; placeId?: string }): void
   onSave(pick: { name: string; lat: number; lng: number; osmId?: string; category?: string; address?: string }): Promise<void>
+  /** Start walking a stroll loop. */
+  onStartLoop(loop: Route): void
   onClose(): void
 }
 
 type Stage = { kind: 'moods' } | { kind: 'results'; mood: ViewMood }
 
-export default function ExploreSheet({ at, approximate, places, tiles, onShow, onCollapse, onFocus, onWalk, onSave, onClose }: Props) {
+export default function ExploreSheet({ at, approximate, places, tiles, onShow, onCollapse, onFocus, onWalk, onSave, onStartLoop, onClose }: Props) {
   const [collapsed, setCollapsedState] = useState(false)
   const setCollapsed = (c: boolean) => {
     setCollapsedState(c)
@@ -341,8 +343,18 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
         M && (result || outing) && !loading && !error ? (
           <div className="btn-row">
             <motion.button className="btn grow" onClick={shuffle} whileTap={{ scale: 0.97 }}>
-              <Shuffle size={17} strokeWidth={2.4} /> {mood === 'stroll' ? 'Another loop' : mood === 'outing' ? 'Another outing' : 'Shuffle'}
+              <Shuffle size={17} strokeWidth={2.4} /> {mood === 'stroll' || mood === 'outing' ? 'Try another' : 'Shuffle'}
             </motion.button>
+            {mood === 'outing' && outing && (
+              <motion.button className="btn primary grow" onClick={() => onWalk({ ...outing.stops[0].pick, placeId: outing.stops[0].pick.savedPlaceId })} whileTap={{ scale: 0.97 }}>
+                <Footprints size={17} strokeWidth={2.4} /> Start outing
+              </motion.button>
+            )}
+            {mood === 'stroll' && result?.loop && (
+              <motion.button className="btn primary grow" onClick={() => onStartLoop(result.loop!)} whileTap={{ scale: 0.97 }}>
+                <Footprints size={17} strokeWidth={2.4} /> Start loop
+              </motion.button>
+            )}
           </div>
         ) : undefined
       }
@@ -383,7 +395,7 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
             {TILES.map((k) => MOOD_BY_KEY[k]).map((m, i) => (
               <motion.button
                 key={m.key}
-                className={`mood-tile ${m.key === 'surprise' || m.key === 'outing' ? 'wide' : ''}`}
+                className="mood-tile"
                 style={{ '--c': m.color } as CSSProperties}
                 onClick={() => pickMood(m.key)}
                 initial={{ opacity: 0, y: 14, scale: 0.96 }}
@@ -488,7 +500,6 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
                   setCollapsed(true)
                   onFocus(p)
                 }}
-                onWalk={(p) => onWalk({ ...p, placeId: p.savedPlaceId })}
                 onSave={save}
               />
             ) : result?.loop ? (
@@ -725,7 +736,7 @@ function PickCard({
       <div className="pick-actions">
         <motion.button className="btn small grow" whileTap={{ scale: 0.96 }} onClick={onSave} disabled={saved} aria-label={saved ? 'On your Want to go list' : 'Add to Want to go'}>
           {saved ? <BookmarkCheck size={16} strokeWidth={2.4} /> : <Bookmark size={16} strokeWidth={2.4} />}
-          {saved ? 'On Want to go' : 'Want to go'}
+          {saved ? 'Added' : 'Want to go'}
         </motion.button>
         {pick.far ? (
           <motion.a className="btn small primary grow" whileTap={{ scale: 0.96 }} href={directionsUrl(pick, pick.name)} target="_blank" rel="noreferrer">
@@ -749,17 +760,14 @@ function OutingCard({
   from,
   saved,
   onFocus,
-  onWalk,
   onSave,
 }: {
   outing: Outing
   from: LatLng
   saved: Set<string>
   onFocus(p: ExplorePick): void
-  onWalk(p: ExplorePick): void
   onSave(p: ExplorePick): Promise<void>
 }) {
-  const first = outing.stops[0].pick
   return (
     <motion.div className="outing" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
       <div className="loop-stats outing-stats">
@@ -825,11 +833,8 @@ function OutingCard({
           target="_blank"
           rel="noreferrer"
         >
-          <Navigation size={16} strokeWidth={2.4} /> Full route
+          <Navigation size={16} strokeWidth={2.4} /> Full route in Maps
         </motion.a>
-        <motion.button className="btn small primary grow" whileTap={{ scale: 0.96 }} onClick={() => onWalk(first)}>
-          <Footprints size={16} strokeWidth={2.4} /> Start: {first.name}
-        </motion.button>
       </div>
     </motion.div>
   )
@@ -939,7 +944,8 @@ export function ExploreNext({
 
   return (
     <section className="explore-next">
-      <div className="list-label">{label}</div>
+      {/* A single card carries the label itself, rather than "This week's picks" over "This week". */}
+      {PERIODS.length > 1 && <div className="list-label">{label}</div>}
       {PERIODS.map(({ key, title, icon: Icon }, i) => {
         const state = picks[key]
         return (
@@ -954,7 +960,7 @@ export function ExploreNext({
               <span className="next-icon">
                 <Icon size={15} strokeWidth={2.4} />
               </span>
-              <strong>{title}</strong>
+              <strong>{PERIODS.length > 1 ? title : label}</strong>
               {state && state !== 'loading' && state !== 'error' && state.ai && (
                 <span className="ai-tag">
                   <Sparkles size={11} /> AI

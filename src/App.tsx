@@ -26,6 +26,7 @@ import { useGeolocation } from './hooks/useGeolocation'
 import { useWalkPlanner, type WalkTarget } from './hooks/useWalkPlanner'
 import { DESKTOP_QUERY } from './hooks/useMedia'
 import { distanceM, formatDistance, geoErrorMessage, getCurrentPosition, type LatLng } from './lib/geo'
+import type { Route } from './lib/routing'
 import { computeFog } from './lib/fog'
 import { suburbAt, type Suburb } from './lib/suburb'
 import { heatFor } from './lib/heat'
@@ -83,9 +84,11 @@ function sheetPadding(open: boolean): Padding {
 /** Fit a whole route on screen, clear of the sheet / side panel. */
 function routePadding(sheetOpen: boolean): Padding {
   if (matchMedia(DESKTOP_QUERY).matches) return { top: 90, bottom: 110, left: sheetOpen ? 450 : 60, right: 70 }
-  return sheetOpen
-    ? { top: 90, bottom: Math.round(window.innerHeight * 0.62 + 40), left: 44, right: 44 }
-    : { top: 110, bottom: 190, left: 44, right: 44 }
+  if (!sheetOpen) return { top: 110, bottom: 190, left: 44, right: 44 }
+  // Fit above the sheet as it actually is (offsetTop ignores its slide-in transform).
+  const sheet = document.querySelector<HTMLElement>('.sheet')
+  const covered = sheet ? window.innerHeight - sheet.offsetTop : window.innerHeight * 0.62
+  return { top: 90, bottom: Math.round(covered + 28), left: 44, right: 44 }
 }
 
 /** Frame the heatmap below the floating heat bar and above the dock. */
@@ -371,12 +374,35 @@ export default function App() {
       notify('Walk started. Lock your phone anytime; progress updates when you open Wander.', 'success')
     })
 
+  const beginLoop = (loop: Route) =>
+    withBusy(async () => {
+      const [lng, lat] = loop.coords[0]
+      const start = { lat, lng }
+      const walk = await startWalk({
+        from: start,
+        to: { ...start, name: 'Loop' },
+        distanceM: loop.distanceM,
+        durationS: loop.durationS,
+        startedAt: Date.now(),
+        path: simplifiedPath(loop.coords),
+      })
+      active.begin({ walkId: walk.id, target: { name: 'Loop', ...start }, route: loop, startedAt: walk.startedAt, loop: true })
+      setSheet(null)
+      geo.start()
+      map.current?.fitRoute(loop.coords, routePadding(false))
+      notify('Loop started. Lock your phone anytime; progress updates when you open Wander.', 'success')
+    })
+
   const endWalk = async () => {
     if (!active.walk) return
     const arrived = !!active.progress?.arrived
     if (
       !arrived &&
-      !(await confirm({ title: 'End this walk?', message: "You haven't reached the destination yet.", confirmLabel: 'End walk' }))
+      !(await confirm({
+        title: active.walk.loop ? 'End this loop?' : 'End this walk?',
+        message: active.walk.loop ? "You're not back at the start yet." : "You haven't reached the destination yet.",
+        confirmLabel: 'End walk',
+      }))
     )
       return
     await finishWalk(active.walk.walkId, arrived)
@@ -457,12 +483,15 @@ export default function App() {
         : !sheet
           ? (active.walk?.route.coords ?? null)
           : null
+  const [walkStopsShown, setWalkStopsShown] = useState(false)
   const stopMarkers = useMemo<StopMarker[]>(() => {
     if (sheet?.type === 'explore') {
       return exploreShow.picks.map((p) => ({ id: p.id, name: p.name, lat: p.lat, lng: p.lng, category: p.category, color: '#F2542D', closed: false }))
     }
     if (sheet?.type === 'walk') {
-      return (planner.stops ?? []).map((s) => ({
+      // Every café along the way only once you've opened "Add a stop"; until then just your chosen one.
+      const shown = walkStopsShown ? (planner.stops ?? []) : planner.stop ? [planner.stop] : []
+      return shown.map((s) => ({
         id: s.osmId,
         name: s.name,
         lat: s.lat,
@@ -474,7 +503,7 @@ export default function App() {
     }
     const st = !sheet && active.walk?.stop
     return st ? [{ id: st.osmId, name: st.name, lat: st.lat, lng: st.lng, category: st.category, color: '#F2542D', closed: false }] : []
-  }, [sheet, planner.stops, active.walk, exploreShow])
+  }, [sheet, planner.stops, planner.stop, walkStopsShown, active.walk, exploreShow])
 
   // Frame explore picks / a stroll loop as they arrive.
   useEffect(() => {
@@ -639,7 +668,7 @@ export default function App() {
           />
         )
       case 'walk':
-        return <WalkSheet key={sheetKey(sheet)} target={sheet.target} planner={planner} onStart={beginWalk} onClose={close} />
+        return <WalkSheet key={sheetKey(sheet)} target={sheet.target} planner={planner} onStart={beginWalk} onStopsShown={setWalkStopsShown} onClose={close} />
       case 'you':
         return (
           <YouSheet
@@ -690,6 +719,7 @@ export default function App() {
               await savePlace(input)
               notify(`Added ${input.name} to Want to go`, 'success')
             }}
+            onStartLoop={beginLoop}
             onClose={close}
           />
         )
@@ -752,6 +782,18 @@ export default function App() {
           const p = allPlaces.find((x) => x.id === id)
           if (p) flyTo(p)
         }}
+        onPoiClick={(poi) => {
+          // Already one of yours? Open that instead of a fresh copy.
+          const saved = allPlaces.find((p) => distanceM(p, poi) < 40 && p.name.trim().toLowerCase() === poi.name.trim().toLowerCase())
+          if (saved) {
+            setSheet({ type: 'place', id: saved.id })
+            flyTo(saved)
+            return
+          }
+          // No real OSM id from the tiles, so it's matched by name and distance when saved.
+          setSheet({ type: 'result', result: { name: poi.name, lat: poi.lat, lng: poi.lng, category: poi.category } })
+          flyTo(poi)
+        }}
         onLongPress={(at) => {
           setSheet({ type: 'pick', mode: 'pin', at })
           flyTo(at)
@@ -783,9 +825,24 @@ export default function App() {
 
       <AnimatePresence>
         {heat && (
-          <HeatBar key="heat-bar" period={period} summary={heat} onPeriod={setPeriod} onMode={setMapMode} onClose={() => setHeatOn(false)} />
+          <HeatBar key="heat-bar" period={period} summary={heat} onPeriod={setPeriod} onMode={setMapMode} onClose={() => {
+              // Back where you came from: Your map.
+              setHeatOn(false)
+              openYou('map')
+            }}
+          />
         )}
-        {fog && fogAt && <FogBar key="fog-bar" fog={fog} onMode={setMapMode} onClose={() => setFogAt(null)} />}
+        {fog && fogAt && (
+          <FogBar
+            key="fog-bar"
+            fog={fog}
+            onMode={setMapMode}
+            onClose={() => {
+              setFogAt(null)
+              openYou('map')
+            }}
+          />
+        )}
       </AnimatePresence>
 
       {!active.walk && !mapMode && (

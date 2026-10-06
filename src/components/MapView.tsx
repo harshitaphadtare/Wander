@@ -62,6 +62,8 @@ interface Props {
   selectedPlaceId: string | null
   onPlaceClick(id: string): void
   onLongPress(at: LatLng): void
+  /** A named place icon from the base map (café, park, museum…) was tapped. */
+  onPoiClick?(poi: OsmPoi): void
   /** Walking route to draw, [lng, lat] pairs. */
   route?: [number, number][] | null
   stops?: StopMarker[]
@@ -107,6 +109,7 @@ export default function MapView({
   selectedPlaceId,
   onPlaceClick,
   onLongPress,
+  onPoiClick,
   route = null,
   stops = [],
   selectedStopId = null,
@@ -131,9 +134,9 @@ export default function MapView({
   const [pinHosts, setPinHosts] = useState<Map<string, HTMLDivElement>>(new Map())
 
   // Latest props for map event handlers, which are bound once at creation.
-  const latest = useRef({ onPlaceClick, onLongPress, onStopClick })
+  const latest = useRef({ onPlaceClick, onLongPress, onPoiClick, onStopClick })
   useEffect(() => {
-    latest.current = { onPlaceClick, onLongPress, onStopClick }
+    latest.current = { onPlaceClick, onLongPress, onPoiClick, onStopClick }
     fixRef.current = fix
     routeRef.current = route
     heatRef.current = heat
@@ -299,6 +302,28 @@ export default function MapView({
     map.on('dragstart', cancel)
     map.on('zoomstart', cancel)
     map.on('contextmenu', (e) => fire(e.lngLat))
+
+    // Tapping a café, park or museum icon on the base map opens it like a search result.
+    const poiLayers = () => map.getStyle().layers.filter((l) => 'source-layer' in l && l['source-layer'] === 'poi' && l.type === 'symbol').map((l) => l.id)
+    const poiAt = (pt: maplibregl.Point) => {
+      const pad = 12 // fingers are bigger than icons
+      return map
+        .queryRenderedFeatures([[pt.x - pad, pt.y - pad], [pt.x + pad, pt.y + pad]], { layers: poiLayers() })
+        .find((f) => f.geometry.type === 'Point' && (f.properties.name_en || f.properties.name))
+    }
+    map.on('click', (e) => {
+      if (!latest.current.onPoiClick) return
+      const f = poiAt(e.point)
+      if (!f || f.geometry.type !== 'Point') return
+      const p = f.properties as { name?: string; name_en?: string; class: string; subclass?: string }
+      const [lng, lat] = f.geometry.coordinates as [number, number]
+      const category = p.subclass && KNOWN_CATEGORIES.has(p.subclass) ? p.subclass : (TILE_CATEGORY[p.class] ?? p.class)
+      const name = (p.name_en || p.name)!
+      latest.current.onPoiClick({ osmId: `tile:${name}|${lat.toFixed(4)}|${lng.toFixed(4)}`, name, lat, lng, category })
+    })
+    map.on('mousemove', (e) => {
+      map.getCanvas().style.cursor = poiAt(e.point) ? 'pointer' : ''
+    })
 
     const pinMap = pins.current
     const stopMap = stopMarkers.current
@@ -649,7 +674,7 @@ const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: 
 function addHeatLayer(map: MLMap, data: GeoJSON.FeatureCollection | null) {
   if (!map.getSource('heat')) map.addSource('heat', { type: 'geojson', data: data ?? EMPTY })
   if (map.getLayer('heat')) return
-  const firstLabel = map.getStyle().layers.find((l) => l.type === 'symbol')?.id
+  const firstLabel = labelsStart(map)
   map.addLayer(
     {
       id: 'heat',
@@ -690,7 +715,7 @@ const FOG_OPACITY = ['*', 0.9, ['get', 'o']] as unknown as number
 function addFogLayer(map: MLMap, data: GeoJSON.FeatureCollection | null) {
   if (!map.getSource('fog')) map.addSource('fog', { type: 'geojson', data: data ?? EMPTY })
   if (map.getLayer('fog')) return
-  const firstLabel = map.getStyle().layers.find((l) => l.type === 'symbol')?.id
+  const firstLabel = labelsStart(map)
   map.addLayer(
     {
       id: 'fog',
@@ -725,10 +750,26 @@ function addFogLayer(map: MLMap, data: GeoJSON.FeatureCollection | null) {
   )
 }
 
+const OWN_LAYERS = new Set(['me-accuracy', 'food-poi', 'heat', 'fog', 'fog-edge', 'route-casing', 'route-line'])
+
+/**
+ * Where the base map's labels begin: the first label above its last shape. Not
+ * simply the first symbol layer, because the style draws bridges and buildings
+ * after its one-way arrows, and those would cover our route.
+ */
+function labelsStart(map: MLMap): string | undefined {
+  const layers = map.getStyle().layers.filter((l) => !OWN_LAYERS.has(l.id))
+  let lastShape = -1
+  layers.forEach((l, i) => {
+    if (l.type !== 'symbol') lastShape = i
+  })
+  return layers.slice(lastShape + 1).find((l) => l.type === 'symbol')?.id
+}
+
 /** Route line sits above roads but below map labels. */
 function addRouteLayers(map: MLMap, coords: [number, number][] | null) {
   if (!map.getSource('route')) map.addSource('route', { type: 'geojson', data: routeData(coords) })
-  const firstLabel = map.getStyle().layers.find((l) => l.type === 'symbol')?.id
+  const firstLabel = labelsStart(map)
   if (!map.getLayer('route-casing')) {
     map.addLayer(
       {

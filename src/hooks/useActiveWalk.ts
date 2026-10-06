@@ -13,6 +13,8 @@ export interface ActiveWalk {
   stop?: { name: string; lat: number; lng: number; osmId: string; category: string }
   route: Route
   startedAt: number
+  /** A stroll that starts and ends where you are, rather than a walk to somewhere. */
+  loop?: boolean
 }
 
 const KEY = 'wander:active-walk'
@@ -55,9 +57,14 @@ export function useActiveWalk(fix: Fix | null) {
     const speed = route.durationS > 0 ? route.distanceM / route.durationS : 1.3
     if (!fix) return { remainingM: route.distanceM, remainingS: route.durationS, arrived: false, offRoute: false }
     const here: LatLng = { lat: fix.lat, lng: fix.lng }
-    const arrived = distanceM(here, walk.target) <= Math.max(ARRIVED_M, Math.min(fix.accuracy, 80))
+    const near = distanceM(here, walk.target) <= Math.max(ARRIVED_M, Math.min(fix.accuracy, 80))
+    // A loop starts where it ends, so being back there only counts once you've had time to walk most of it.
+    const halfway = Date.now() - walk.startedAt > route.durationS * 500
+    const arrived = near && (!walk.loop || halfway)
     const np = nearestPointOnLine(lineString(route.coords), point([fix.lng, fix.lat]), { units: 'meters' })
-    const along = np.properties.location ?? 0
+    let along = np.properties.location ?? 0
+    // Near the start of a loop, the nearest point can just as well be its end.
+    if (walk.loop && !halfway && along > route.distanceM * 0.75) along = 0
     const remainingM = arrived ? 0 : Math.max(0, route.distanceM - along) + (np.properties.dist ?? 0)
     return { remainingM, remainingS: remainingM / speed, arrived, offRoute: (np.properties.dist ?? 0) > 120 }
   }, [walk, fix])

@@ -285,6 +285,8 @@ a.btn.primary {
 /* ---------- Explore: "Right now", one suggestion for the moment ---------- */
 .right-now {
   position: relative;
+  /* The sheet body is a flex column; don't let it squash the card. */
+  flex: none;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -961,6 +963,24 @@ a.btn.primary {
   margin-right: 0;
   padding-right: 14px;
   mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 22px), transparent);
+}
+/* "5 places · ⇅ Most visited" above the list. */
+.sort-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 2px 2px -6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.sort-line button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 2px;
+  color: var(--ink-2);
+  font-weight: 650;
 }
 .sort-pill {
   flex: none;

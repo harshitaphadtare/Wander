@@ -46,6 +46,8 @@ export default function VisitSheet({ visitId, place, fresh = false, onOpenPlace,
   const [stepsDraft, setStepsDraft] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [viewing, setViewing] = useState<number | null>(null)
+  // While the guide tiles are up, the note and steps fields stay folded until you tap their tile.
+  const [unfolded, setUnfolded] = useState<{ note?: boolean; steps?: boolean }>({})
   const input = useRef<HTMLInputElement>(null)
   const area = useRef<HTMLTextAreaElement>(null)
   const stepsInput = useRef<HTMLInputElement>(null)
@@ -118,6 +120,11 @@ export default function VisitSheet({ visitId, place, fresh = false, onOpenPlace,
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })
     el.focus({ preventScroll: true })
   }
+  const unfold = (key: 'note' | 'steps', el: () => HTMLElement | null) => {
+    setUnfolded((u) => ({ ...u, [key]: true }))
+    // Focus once the field has rendered.
+    setTimeout(() => focusField(el()), 30)
+  }
 
   // Photos this visit lists but this device doesn't have yet (added on another device),
   // and photos added here that haven't reached the cloud.
@@ -137,19 +144,21 @@ export default function VisitSheet({ visitId, place, fresh = false, onOpenPlace,
       status: arriving ? `${arriving} on the way` : photos.length ? `${photos.length} added` : 'Add',
       act: () => input.current?.click(),
     },
-    { key: 'note', icon: PenLine, label: 'Note', done: hasNote, status: hasNote ? 'Written' : 'Write', act: () => focusField(area.current) },
+    { key: 'note', icon: PenLine, label: 'Note', done: hasNote, status: hasNote ? 'Written' : 'Write', act: () => unfold('note', () => area.current) },
     {
       key: 'steps',
       icon: Footprints,
       label: 'Steps',
       done: !!visit.steps,
       status: visit.steps ? fmtSteps(visit.steps) : 'Log',
-      act: () => focusField(stepsInput.current),
+      act: () => unfold('steps', () => stepsInput.current),
     },
   ]
   const doneCount = memorySteps.filter((m) => m.done).length
   // Shown right after a check-in, and on any visit that's still missing something.
   const showGuide = fresh || doneCount < memorySteps.length
+  const showNote = !showGuide || hasNote || unfolded.note
+  const showSteps = !showGuide || !!visit.steps || unfolded.steps
 
   const items: PhotoItem[] = photos.map(({ photo, url }) => ({ id: photo.id, url, label: shortDate(visit.arrivedAt) }))
 
@@ -273,58 +282,62 @@ export default function VisitSheet({ visitId, place, fresh = false, onOpenPlace,
         <input ref={input} type="file" accept="image/*" multiple hidden onChange={(e) => onFiles(e.target.files)} />
       </section>
 
-      <label className="memo">
-        <span className="list-label">Note</span>
-        <textarea
-          ref={area}
-          value={value}
-          maxLength={MAX_NOTE}
-          rows={2}
-          placeholder="What happened here? Got the pistachio croissant…"
-          onChange={(e) => setNote(e.target.value)}
-        />
-        <AnimatePresence>
-          {value.length > MAX_NOTE - 80 && (
-            <motion.small className="memo-count" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              {MAX_NOTE - value.length} left
-            </motion.small>
-          )}
-        </AnimatePresence>
-      </label>
-
-      <section className="steps-field">
-        <span className="list-label">Steps</span>
-        <div className="steps-row">
-          <span className="steps-icon" aria-hidden>
-            <Footprints size={18} strokeWidth={2.2} />
-          </span>
-          <input
-            ref={stepsInput}
-            inputMode="numeric"
-            pattern="[0-9]*"
-            placeholder="How many steps?"
-            aria-label="Steps"
-            value={stepsDraft ?? (stepsValue ? fmtSteps(Number(stepsValue)) : '')}
-            onChange={(e) => setStepsDraft(e.target.value.replace(/[^\d]/g, ''))}
-            onBlur={(e) => commitSteps(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+      {showNote && (
+        <label className="memo">
+          <span className="list-label">Note</span>
+          <textarea
+            ref={area}
+            value={value}
+            maxLength={MAX_NOTE}
+            rows={2}
+            placeholder="What happened here? Got the pistachio croissant…"
+            onChange={(e) => setNote(e.target.value)}
           />
-          <button className="icon-btn" aria-label="1,000 fewer steps" onClick={() => bumpSteps(-1000)} disabled={!visit.steps}>
-            <Minus size={15} />
-          </button>
-          <button className="icon-btn" aria-label="1,000 more steps" onClick={() => bumpSteps(1000)}>
-            <Plus size={15} />
-          </button>
-        </div>
-        <div className="steps-quick">
-          {[2000, 5000, 10000].map((n) => (
-            <button key={n} className="chip" onClick={() => void setVisitSteps(visitId, n)}>
-              {fmtSteps(n)}
+          <AnimatePresence>
+            {value.length > MAX_NOTE - 80 && (
+              <motion.small className="memo-count" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                {MAX_NOTE - value.length} left
+              </motion.small>
+            )}
+          </AnimatePresence>
+        </label>
+      )}
+
+      {showSteps && (
+        <section className="steps-field">
+          <span className="list-label">Steps</span>
+          <div className="steps-row">
+            <span className="steps-icon" aria-hidden>
+              <Footprints size={18} strokeWidth={2.2} />
+            </span>
+            <input
+              ref={stepsInput}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              placeholder="How many steps?"
+              aria-label="Steps"
+              value={stepsDraft ?? (stepsValue ? fmtSteps(Number(stepsValue)) : '')}
+              onChange={(e) => setStepsDraft(e.target.value.replace(/[^\d]/g, ''))}
+              onBlur={(e) => commitSteps(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+            />
+            <button className="icon-btn" aria-label="1,000 fewer steps" onClick={() => bumpSteps(-1000)} disabled={!visit.steps}>
+              <Minus size={15} />
             </button>
-          ))}
-          <small>From your iPhone’s Health app, if you like.</small>
-        </div>
-      </section>
+            <button className="icon-btn" aria-label="1,000 more steps" onClick={() => bumpSteps(1000)}>
+              <Plus size={15} />
+            </button>
+          </div>
+          <div className="steps-quick">
+            {[2000, 5000, 10000].map((n) => (
+              <button key={n} className="chip" onClick={() => void setVisitSteps(visitId, n)}>
+                {fmtSteps(n)}
+              </button>
+            ))}
+            <small>From your iPhone’s Health app, if you like.</small>
+          </div>
+        </section>
+      )}
 
       <p className="group-footer">Photos are resized to save space. When you’re signed in they’re encrypted on this device, then backed up so your other devices show them too.</p>
 

@@ -1,4 +1,4 @@
-import { Settings2 } from 'lucide-react'
+import { Settings } from 'lucide-react'
 import { motion } from 'motion/react'
 import type { ComponentProps } from 'react'
 import type { PlaceWithStats } from '../hooks/useData'
@@ -53,7 +53,7 @@ export default function YouSheet({ section, onSection, places, lists, visits, fr
       title={TITLES[section]}
       actions={
         <motion.button className="icon-btn" onClick={onSettings} whileTap={{ scale: 0.88 }} aria-label="Settings">
-          <Settings2 size={18} strokeWidth={2.3} />
+          <Settings size={18} strokeWidth={2.3} />
         </motion.button>
       }
     >

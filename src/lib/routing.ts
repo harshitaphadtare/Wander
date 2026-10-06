@@ -141,7 +141,7 @@ export async function loopRoute(start: LatLng, lengthM: number, seed: number, si
       })
       if (res.ok) {
         const data = (await res.json()) as { coordinates: [number, number][]; distance: number; duration: number }
-        return { coords: data.coordinates, distanceM: data.distance, durationS: data.duration }
+        return trimSpurs({ coords: data.coordinates, distanceM: data.distance, durationS: data.duration })
       }
     } catch (err) {
       if ((err as Error).name === 'AbortError') throw err
@@ -151,5 +151,41 @@ export async function loopRoute(start: LatLng, lengthM: number, seed: number, si
   const bearing = (seed * 137.5) % 360 // golden angle: successive seeds spread evenly
   const a = offset(start, side, bearing)
   const b = offset(start, side, bearing + 60)
-  return walkingRoute([start, a, b, start], signal)
+  return trimSpurs(await walkingRoute([start, a, b, start], signal))
+}
+
+function pathLength(coords: [number, number][]) {
+  let m = 0
+  for (let i = 1; i < coords.length; i++) m += distanceM(toLatLng(coords[i - 1]), toLatLng(coords[i]))
+  return m
+}
+const toLatLng = ([lng, lat]: [number, number]): LatLng => ({ lat, lng })
+
+/**
+ * A loop's turning points sometimes land at the end of a lane, so the route walks
+ * in and straight back out. Cut those out-and-back spurs: wherever the path returns
+ * to a point it has already passed (and the detour is a small part of the loop), skip it.
+ */
+export function trimSpurs(route: Route): Route {
+  const c = route.coords
+  const total = pathLength(c)
+  if (c.length < 4 || total === 0) return route
+  const out: [number, number][] = []
+  let i = 0
+  while (i < c.length) {
+    out.push(c[i])
+    let skipTo = -1
+    let along = 0
+    // The last 15% of the loop heads back to the start on purpose; leave it alone.
+    for (let j = i + 2; j < c.length && along < total * 0.35; j++) {
+      along += distanceM(toLatLng(c[j - 1]), toLatLng(c[j]))
+      if (distanceM(toLatLng(c[i]), toLatLng(c[j])) < 4 && j < c.length - 1) skipTo = j
+    }
+    i = skipTo > 0 ? skipTo + 1 : i + 1
+  }
+  const kept = pathLength(out)
+  // Never trim so much that it stops being a walk worth taking.
+  if (out.length < 4 || kept < total * 0.6) return route
+  const ratio = kept / total
+  return { ...route, coords: out, distanceM: route.distanceM * ratio, durationS: route.durationS * ratio }
 }

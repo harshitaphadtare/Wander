@@ -225,7 +225,8 @@ export function SavedPlaceSheet({ place, from, lists, busy, onVisit, onCheckIn, 
         </div>
       )}
 
-      <EatClubNote category={place.category} />
+      {/* A deal tip helps when you're deciding whether to go, not on your eighth visit. */}
+      {place.visitCount === 0 && <EatClubNote category={place.category} />}
 
       <ListChips placeId={place.id} listIds={place.listIds ?? []} lists={lists} />
 

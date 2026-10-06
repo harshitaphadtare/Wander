@@ -1,6 +1,6 @@
 import { Beer, ChevronRight, Coffee, Footprints, Navigation, Plus, RotateCw, UtensilsCrossed, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import type { WalkPlanner, WalkTarget } from '../hooks/useWalkPlanner'
 import { duration, timeOfDay } from '../lib/format'
 import { formatDistance } from '../lib/geo'
@@ -26,14 +26,23 @@ interface Props {
   target: WalkTarget
   planner: WalkPlanner
   onStart(): void
+  /** The "Add a stop" list opened or closed, so the map can show or hide every option. */
+  onStopsShown?(shown: boolean): void
   onClose(): void
 }
 
-export default function WalkSheet({ target, planner, onStart, onClose }: Props) {
+export default function WalkSheet({ target, planner, onStart, onStopsShown, onClose }: Props) {
   const { route, base, stops, stop, setStop, arriveAt, routeError, stopsError, hoursStatus, retry, extraS, viaLoading } = planner
   const [filter, setFilter] = useState<Filter>('all')
   /** Stops stay folded into one row until you want one: most walks don't need a detour. */
-  const [showStops, setShowStops] = useState(false)
+  const [showStops, setShowStopsState] = useState(false)
+  const setShowStops = (shown: boolean) => {
+    setShowStopsState(shown)
+    onStopsShown?.(shown)
+  }
+  // The sheet starts folded; tell the map when it closes too, so the next walk starts clean.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => () => onStopsShown?.(false), [])
 
   const visible = useMemo(() => (stops ?? []).filter((s) => filter === 'all' || s.group === filter), [stops, filter])
   const counts = useMemo(() => {

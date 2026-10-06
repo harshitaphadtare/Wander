@@ -96,7 +96,7 @@ export default function PickPlaceSheet({ at, accuracy, mode, places, busy, nearb
           ? accuracy
             ? `Located within ${formatDistance(accuracy)}`
             : 'Your location'
-          : `${at.lat.toFixed(4)}, ${at.lng.toFixed(4)}`
+          : 'Dropped pin'
       }
       title={mode === 'here' ? 'Where are you?' : 'Dropped pin'}
     >

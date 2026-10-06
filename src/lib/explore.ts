@@ -496,7 +496,8 @@ export async function explore(o: Options): Promise<ExploreResult> {
     score += jitter(c.id, seed) * 0.8
 
     const facts = [
-      visits === 0 ? (wishlist ? 'On your Want to go list' : 'Never been') : `Been ${visits}×`,
+      // A Want to go pick already says so in its reason; no need for a tag too.
+      visits === 0 ? (wishlist ? null : 'Never been') : `Been ${visits}×`,
       far ? `${formatDistance(d)} away` : `${Math.max(1, mins)} min walk`,
       open.text,
     ].filter((f): f is string => !!f)

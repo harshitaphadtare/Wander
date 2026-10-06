@@ -997,8 +997,16 @@ button.row:active:not(:disabled) {
   padding: 0;
   color: var(--ink-2);
 }
+.btn svg {
+  flex: none;
+}
 .btn.grow {
   flex: 1;
+  /* Share the row even on narrow phones; a long label truncates instead of spilling out. */
+  min-width: 0;
+  padding-inline: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .btn-row {
@@ -1583,13 +1591,19 @@ button.group-row:active:not(:disabled) {
   position: fixed;
   z-index: 100;
   top: calc(var(--safe-top) + 10px);
-  left: 50%;
-  max-width: calc(100vw - 32px);
+  /* Centred between the edges, so it can use the full width before wrapping
+     (left: 50% + translate would cap it at half the screen). */
+  left: 16px;
+  right: 16px;
+  width: fit-content;
+  max-width: 420px;
+  margin-inline: auto;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 8px 16px 8px 8px;
-  border-radius: 999px;
+  /* Pill on one line, still tidy if a long message wraps. */
+  border-radius: 22px;
   background: #121110;
   color: #f6f4f0;
   font-size: 14.5px;

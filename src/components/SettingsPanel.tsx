@@ -91,7 +91,7 @@ export default function SettingsPanel({ placeCount, visitCount, autoDetect, onAu
 
       <Group
         title="Visits"
-        footer="While Wander is on screen, staying ~75 m from one spot for 10+ minutes logs a visit. iPhone doesn't let web apps use location once they're closed, so the “You're at…” card offers a one-tap check-in whenever you open the app."
+        footer="With Wander open, stay somewhere for 10 minutes and it checks you in, or asks where you are if it’s somewhere new. Your iPhone stops sharing location once Wander is closed, so when you come back it offers a one-tap check-in instead."
       >
         <div className="group-row">
           <span className="group-icon" style={{ background: '#12A187' }}>

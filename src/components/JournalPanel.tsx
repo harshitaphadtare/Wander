@@ -6,7 +6,7 @@ import type { Visit } from '../lib/db'
 import { dayLabel, duration, shortDate, startOfDay, steps as fmtSteps, timeOfDay } from '../lib/format'
 import { PERIOD_OPTIONS, periodStart, type Period } from '../lib/periods'
 import { deleteVisit } from '../lib/places'
-import { CountUp, EmptyState, IconTile, Segmented, Stagger } from '../ui/bits'
+import { CountUp, EmptyState, IconTile, Stagger } from '../ui/bits'
 import { useConfirm } from '../ui/Confirm'
 import { categoryIcon } from '../ui/icons'
 import { PhotoStrip, PhotoViewer } from '../ui/Photos'
@@ -62,7 +62,14 @@ export default function JournalBody({ visits, places, period, onPeriod, onVisit 
 
   return (
     <>
-      <Segmented<Period> id="journal-period" value={period} onChange={onPeriod} options={PERIOD_OPTIONS} />
+      {/* Chips, not a second segmented control under the You sheet's own. */}
+      <div className="chips scroll period-chips" role="radiogroup" aria-label="Period">
+        {PERIOD_OPTIONS.map(([key, label]) => (
+          <button key={key} role="radio" aria-checked={period === key} className={`chip ${period === key ? 'is-on solid' : ''}`} onClick={() => onPeriod(key)}>
+            {label}
+          </button>
+        ))}
+      </div>
 
       <div className="stat-cards">
         <div className="stat-card">
@@ -77,7 +84,7 @@ export default function JournalBody({ visits, places, period, onPeriod, onVisit 
           </strong>
           <small>Places</small>
         </div>
-        <div className="stat-card accent">
+        <div className={`stat-card ${newPlaces > 0 ? 'accent' : ''}`}>
           <strong className="display num">
             <CountUp value={newPlaces} />
           </strong>

@@ -34,6 +34,20 @@ function rememberRecent(place: PhotonPlace) {
   }
 }
 
+/**
+ * With a location, closest first; and when some matches are local, drop the
+ * namesakes on the other side of the world (a café search shouldn't offer Italian towns).
+ */
+function nearestFirst(found: PhotonPlace[], here: LatLng | null): PhotonPlace[] {
+  if (!here) return found
+  const withD = found.map((r) => ({ r, d: distanceM(here, r) }))
+  const local = withD.some((x) => x.d < 100_000)
+  return withD
+    .filter((x) => !local || x.d < 500_000)
+    .sort((a, b) => a.d - b.d)
+    .map((x) => x.r)
+}
+
 interface Props {
   places: PlaceWithStats[]
   near: () => LatLng | null
@@ -70,9 +84,10 @@ export default function SearchBar({ places, near, from, onPickSaved, onPickResul
     const t = setTimeout(async () => {
       setLoading(true)
       try {
-        const found = await searchPlaces(q, near() ?? undefined, ctrl.signal)
+        const here = near()
+        const found = await searchPlaces(q, here ?? undefined, ctrl.signal)
         const savedOsm = new Set(places.map((p) => p.osmId).filter(Boolean))
-        setResults(found.filter((r) => !r.osmId || !savedOsm.has(r.osmId)))
+        setResults(nearestFirst(found.filter((r) => !r.osmId || !savedOsm.has(r.osmId)), here))
         setError(null)
       } catch (err) {
         if ((err as Error).name !== 'AbortError')
@@ -254,6 +269,9 @@ export default function SearchBar({ places, near, from, onPickSaved, onPickResul
             )}
             {!loading && !error && q.length >= 2 && savedMatches.length === 0 && results.length === 0 && (
               <p className="search-hint">No places match “{q}”.</p>
+            )}
+            {loading && !error && q.length >= 2 && savedMatches.length === 0 && results.length === 0 && (
+              <p className="search-hint">Searching for “{q}”…</p>
             )}
             {error && <p className="search-hint">{error}</p>}
           </motion.div>

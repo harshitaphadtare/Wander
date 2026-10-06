@@ -29,14 +29,14 @@ export default function WalkBanner({ walk, progress, onCheckIn, onEnd }: Props) 
       <AnimatePresence mode="wait" initial={false}>
         {progress.arrived ? (
           <motion.div key="arrived" className="walk-banner-text" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-            <small>You've arrived</small>
-            <strong>{walk.target.name}</strong>
+            <small>{walk.loop ? 'Loop done' : "You've arrived"}</small>
+            <strong>{walk.loop ? 'Back where you started' : walk.target.name}</strong>
           </motion.div>
         ) : (
           <motion.div key="walking" className="walk-banner-text" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
             <small>
               {walk.stop ? `Via ${walk.stop.name} · ` : ''}
-              {progress.offRoute ? 'Off route' : `Arrive ${eta}`}
+              {progress.offRoute ? 'Off route' : walk.loop ? `Back by ${eta}` : `Arrive ${eta}`}
             </small>
             <strong>
               {duration(Math.max(60_000, progress.remainingS * 1000))} · {formatDistance(progress.remainingM)}
@@ -45,8 +45,14 @@ export default function WalkBanner({ walk, progress, onCheckIn, onEnd }: Props) 
         )}
       </AnimatePresence>
       {progress.arrived && (
-        <motion.button className="btn primary small" onClick={onCheckIn} whileTap={{ scale: 0.95 }} initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
-          Check in
+        <motion.button
+          className="btn primary small"
+          onClick={walk.loop ? onEnd : onCheckIn}
+          whileTap={{ scale: 0.95 }}
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+        >
+          {walk.loop ? 'Done' : 'Check in'}
         </motion.button>
       )}
       <button className="walk-banner-end" onClick={onEnd} aria-label="End walk">

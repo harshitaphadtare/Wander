@@ -29,9 +29,9 @@ export default function Toast({ toast, onDone }: { toast: ToastMessage | null; o
           className={`toast toast-${toast.tone ?? 'info'}`}
           role="status"
           onClick={onDone}
-          initial={{ y: -28, opacity: 0, scale: 0.9, x: '-50%' }}
-          animate={{ y: 0, opacity: 1, scale: 1, x: '-50%' }}
-          exit={{ y: -18, opacity: 0, scale: 0.94, x: '-50%', transition: { duration: 0.18 } }}
+          initial={{ y: -28, opacity: 0, scale: 0.9 }}
+          animate={{ y: 0, opacity: 1, scale: 1 }}
+          exit={{ y: -18, opacity: 0, scale: 0.94, transition: { duration: 0.18 } }}
           transition={{ type: 'spring', stiffness: 460, damping: 32 }}
         >
           <span className="toast-icon">

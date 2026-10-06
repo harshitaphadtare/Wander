@@ -80,9 +80,30 @@ get the sign-in screen (Google, or email + password with reset) and encrypted ph
 
 1. Sign up at https://supabase.com with GitHub (no card).
 2. **New project**: any name, set a database password (save it somewhere), region **Sydney**.
-3. **SQL Editor → New query**: paste all of [`supabase/schema.sql`](../supabase/schema.sql) and click **Run**.
-   It's safe to re-run. **If you set sync up earlier, run it again now**: it adds the encryption
-   key function and the new `lists` table, and sync shows an error until you do.
+3. **Database tables:** set up the automatic schema update below (recommended), or once by hand:
+   **SQL Editor → New query**, paste all of [`supabase/schema.sql`](../supabase/schema.sql) and
+   click **Run**. It's safe to re-run.
+
+   **Apply database changes automatically on deploy (recommended).** Every production deploy on
+   Vercel runs [`scripts/apply-schema.mjs`](../scripts/apply-schema.mjs), which sends
+   `schema.sql` to your project through Supabase's API in one transaction (all or nothing).
+   It never blocks a deploy: if it can't run, the build log says why and the app still goes live.
+   One-time setup:
+   1. In Supabase, click your **profile picture** (top right) → **Account preferences** →
+      **Access Tokens** → **Generate new token**. Name it `Vercel deploy`. Under **Resource
+      access** choose **Project** and pick your organization and the **wander** project. Under
+      **Permissions → Database**, set the **Database** row ("Database access and data
+      operations") to **Read & write** and leave everything else as **None**. **Review access**
+      should list only Database (read-write) on wander, with `execute_sql` among its tools.
+      **Create token** and copy it (it's shown only once).
+   2. In Vercel: your project → **Settings → Environment Variables** → add
+      `SUPABASE_ACCESS_TOKEN` with the token as the value. Tick **Production** only, then **Save**.
+   3. **Deployments** → **⋯** on the latest one → **Redeploy**. In the build log you should see
+      `[schema] supabase/schema.sql applied to project …`.
+
+   That token can run any SQL on your database (it's limited to the wander project), so it only
+   goes in Vercel's settings: never in `.env` files, never with a `VITE_` prefix (that would put
+   it in the app).
 4. **Project Settings → API Keys**: copy the **Project URL** and the **publishable** key
    (starts with `sb_publishable_`; the legacy `anon` key also works). Both are safe to put in
    front-end code, because row-level security stops anyone reading your rows.

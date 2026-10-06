@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "dev:phone": "vite --host",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/apply-schema.mjs",
+    "db:apply": "node scripts/apply-schema.mjs --force",
     "lint": "oxlint",
     "preview": "vite preview",
     "icons": "node scripts/icons.mjs"

@@ -55,20 +55,41 @@ async function upload(userId: string, key: CryptoKey) {
   }
 }
 
+/** Photo ids that are in storage, from one listing of your folder (each photo is a sub-folder). */
+async function uploadedIds(userId: string): Promise<Set<string>> {
+  const ids = new Set<string>()
+  const PAGE = 1000
+  for (let offset = 0; ; offset += PAGE) {
+    const { data, error } = await supabase!.storage.from(BUCKET).list(userId, { limit: PAGE, offset })
+    if (error) throw storageError(error)
+    for (const item of data) ids.add(item.name)
+    if (data.length < PAGE) return ids
+  }
+}
+
 async function download(userId: string, key: CryptoKey) {
   const visits = await db.visits.filter((v) => !v.deleted && !!v.photoIds?.length).toArray()
   const have = new Set(await db.photos.toCollection().primaryKeys())
   const now = Date.now()
+  const wanted = visits.some((v) => v.photoIds!.some((id) => !have.has(id) && now - (missing.get(id) ?? 0) >= RETRY_MISSING_MS))
+  if (!wanted) return
+  // Ask storage what's there first. Requesting a photo the other device hasn't
+  // uploaded yet fails with a 400 that the browser logs, two per photo, every sync.
+  const stored = await uploadedIds(userId)
   let added = 0
   for (const v of visits) {
     for (const [i, id] of (v.photoIds ?? []).entries()) {
       if (have.has(id) || now - (missing.get(id) ?? 0) < RETRY_MISSING_MS) continue
+      if (!stored.has(id)) {
+        // Not uploaded yet (the other device hasn't synced since): try again later.
+        missing.set(id, now)
+        continue
+      }
       const [full, thumb] = await Promise.all([
         supabase!.storage.from(BUCKET).download(path(userId, id, 'full')),
         supabase!.storage.from(BUCKET).download(path(userId, id, 'thumb')),
       ])
       if (full.error || !full.data) {
-        // Not uploaded yet (the other device hasn't synced since): try again later.
         missing.set(id, now)
         continue
       }

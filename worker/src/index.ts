@@ -22,6 +22,9 @@ export interface Env {
   GEMINI_MODEL?: string
   /** Comma-separated origins allowed to call this API. `https://*.wander.pages.dev` style wildcards are OK. */
   ALLOWED_ORIGINS: string
+  /** Per-IP rate limits (wrangler.jsonc `ratelimits`). Optional so local dev works without them. */
+  ROUTE_LIMIT?: RateLimit
+  AI_LIMIT?: RateLimit
 }
 
 const ORS_FOOT = 'https://api.openrouteservice.org/v2/directions/foot-walking/geojson'
@@ -271,6 +274,15 @@ export default {
 
     // Browsers always send Origin on cross-site calls; block everyone else's sites.
     if (!allowed) return json({ error: 'Origin not allowed' }, 403)
+
+    // The Origin check stops other websites, but any script can fake that header.
+    // Per-IP limits keep someone from draining the free ORS and Gemini quotas.
+    const limiter = pathname === '/ai' ? env.AI_LIMIT : env.ROUTE_LIMIT
+    if (limiter) {
+      const ip = req.headers.get('CF-Connecting-IP') ?? 'unknown'
+      const { success } = await limiter.limit({ key: ip })
+      if (!success) return json({ error: 'Too many requests. Try again in a minute.' }, 429, { ...cors, 'Retry-After': '60' })
+    }
 
     if (pathname === '/ai' && req.method === 'POST') return ai(req, env, cors)
     if (!env.ORS_API_KEY) return json({ error: 'ORS_API_KEY is not set' }, 500, cors)

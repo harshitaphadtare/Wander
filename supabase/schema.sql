@@ -15,9 +15,17 @@ create table if not exists public.records (
 create index if not exists records_user_cursor on public.records (user_id, server_updated_at);
 
 -- Always stamp server time on write, whatever the client sends.
+-- Last write wins by the row's own timestamp: a device pushing an older copy
+-- (edited offline before a newer edit arrived from another device) is ignored
+-- instead of overwriting the newer one. Returning null skips just that row,
+-- including on upserts. Equal timestamps still write, so re-uploading the same
+-- version (e.g. the one-off switch to encrypted rows) works.
 create or replace function public.records_touch()
 returns trigger language plpgsql as $$
 begin
+  if tg_op = 'UPDATE' and new.updated_at < old.updated_at then
+    return null;
+  end if;
   new.server_updated_at := clock_timestamp();
   return new;
 end $$;

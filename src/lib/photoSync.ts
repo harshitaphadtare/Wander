@@ -34,8 +34,12 @@ export async function queuePhotoDeletes(ids: string[]) {
 }
 
 async function upload(userId: string, key: CryptoKey) {
-  const todo = (await db.photos.toArray()).filter((p) => p.uploaded !== 1)
-  for (const p of todo) {
+  // One photo in memory at a time: loading every full-size blob at once to find the
+  // few not yet uploaded can get the tab killed on an iPhone.
+  const ids = await db.photos.toCollection().primaryKeys()
+  for (const id of ids) {
+    const p = await db.photos.get(id)
+    if (!p || p.uploaded === 1) continue
     const thumb = p.thumb ?? p.blob
     const [full, small] = await Promise.all([
       sealBytes(key, p.id, 'full', await p.blob.arrayBuffer()),
@@ -68,8 +72,17 @@ async function download(userId: string, key: CryptoKey) {
         missing.set(id, now)
         continue
       }
-      const blob = new Blob([await openBytes(key, id, 'full', await full.data.arrayBuffer())], { type: 'image/jpeg' })
-      const small = thumb.data ? new Blob([await openBytes(key, id, 'thumb', await thumb.data.arrayBuffer())], { type: 'image/jpeg' }) : undefined
+      let blob: Blob
+      let small: Blob | undefined
+      try {
+        blob = new Blob([await openBytes(key, id, 'full', await full.data.arrayBuffer())], { type: 'image/jpeg' })
+        small = thumb.data ? new Blob([await openBytes(key, id, 'thumb', await thumb.data.arrayBuffer())], { type: 'image/jpeg' }) : undefined
+      } catch (err) {
+        // An unreadable photo must not stop the rest of sync; try it again later.
+        console.warn(`[wander] couldn't open photo ${id}`, err)
+        missing.set(id, now)
+        continue
+      }
       const size = await createImageBitmap(blob).then(
         (b) => {
           const s = { width: b.width, height: b.height }
@@ -102,10 +115,13 @@ async function removeDeleted(userId: string) {
 /** Photos whose visit was deleted (here or on another device) go too. */
 async function pruneOrphans() {
   const live = new Set((await db.visits.filter((v) => !v.deleted).toArray()).map((v) => v.id))
-  const orphans = (await db.photos.toArray()).filter((p) => !live.has(p.visitId))
+  // Read just the (visitId, id) index pairs, never the image blobs.
+  const byVisit = db.photos.orderBy('visitId')
+  const [visitIds, ids] = await Promise.all([byVisit.keys(), byVisit.primaryKeys()])
+  const orphans = ids.filter((_, i) => !live.has(String(visitIds[i])))
   if (!orphans.length) return
-  await db.photos.bulkDelete(orphans.map((p) => p.id))
-  await queuePhotoDeletes(orphans.map((p) => p.id))
+  await db.photos.bulkDelete(orphans)
+  await queuePhotoDeletes(orphans)
   notifyLocalChange()
 }
 

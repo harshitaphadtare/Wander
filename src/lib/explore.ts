@@ -40,7 +40,7 @@ export const REACH_OPTIONS: readonly (readonly [Reach, string])[] = [
 
 const WALK_MPS = 1.33 // ~4.8 km/h
 const STREET_FACTOR = 1.3 // streets are longer than a straight line
-const walkMinutes = (m: number) => Math.round((m * STREET_FACTOR) / WALK_MPS / 60)
+export const walkMinutes = (m: number) => Math.round((m * STREET_FACTOR) / WALK_MPS / 60)
 /** Beyond this you'd take a tram or drive, so cards offer directions instead of "Walk there". */
 export const WALKABLE_M = 3500
 
@@ -165,6 +165,8 @@ const CACHE_MS = 10 * 60_000
 const STORE_KEY = 'wander:explore-cache-v2' // v2: wide searches sample the whole radius
 const STORE_MS = { rich: 24 * 3_600_000, quick: 3_600_000 }
 const STORE_MAX = 24
+/** ~1 MB of characters: localStorage is ~5 MB for everything, so this cache never crowds out the rest. */
+const STORE_MAX_CHARS = 1_000_000
 
 type Stored = Record<string, { at: number; list: Candidate[]; rich?: boolean }>
 function readStore(): Stored {
@@ -180,9 +182,15 @@ function writeStore(key: string, list: Candidate[], rich: boolean) {
     // Never let a quick answer overwrite a fuller one that's still fresh.
     if (!rich && all[key]?.rich && Date.now() - all[key].at < STORE_MS.rich) return
     all[key] = { at: Date.now(), list, rich }
-    const keep = Object.entries(all)
-      .sort((a, b) => b[1].at - a[1].at)
-      .slice(0, STORE_MAX)
+    // Newest first, until we hit the entry or size limit.
+    const keep: [string, Stored[string]][] = []
+    let chars = 0
+    for (const entry of Object.entries(all).sort((a, b) => b[1].at - a[1].at)) {
+      const size = JSON.stringify(entry).length
+      if (keep.length >= STORE_MAX || (keep.length && chars + size > STORE_MAX_CHARS)) break
+      keep.push(entry)
+      chars += size
+    }
     localStorage.setItem(STORE_KEY, JSON.stringify(Object.fromEntries(keep)))
     localStorage.removeItem('wander:explore-cache') // the v1 cache, superseded
   } catch {
@@ -224,6 +232,8 @@ async function candidates(
     return stored.list
   }
 
+  /** A source answered fine but found nothing: that's "nothing here", not "servers busy". */
+  let answeredEmpty = false
   const remember = (list: Candidate[], rich: boolean) => {
     cache.set(key, { at: Date.now(), list })
     writeStore(key, list, rich)
@@ -237,7 +247,10 @@ async function candidates(
     const query = `[out:json][timeout:20];(${tags.map((t) => `nwr(${around})${t}["name"];`).join('')});out center tags 250;`
     const elements = await overpass(query, undefined, 12_000)
     const list = dedupe(elements.map(toCandidate).filter((c): c is Candidate => !!c))
-    if (!list.length) throw new Error('Nothing found nearby')
+    if (!list.length) {
+      answeredEmpty = true
+      throw new Error('Nothing found nearby')
+    }
     return remember(list, true)
   })()
   fromOverpass.catch(() => {}) // a late failure is fine
@@ -262,7 +275,10 @@ async function candidates(
         address: p.address,
       }),
     )
-    if (!list.length) throw new Error('Nothing found nearby')
+    if (!list.length) {
+      answeredEmpty = true
+      throw new Error('Nothing found nearby')
+    }
     return list
   })
   fromPhoton.catch(() => {})
@@ -297,7 +313,7 @@ async function candidates(
   if (first?.length) return remember(dedupe([...first, ...local]), false)
   const late = fromTiles() // the map may have loaded more tiles while we waited
   if (late.length) return remember(dedupe(late), false)
-  throw new Error('OpenStreetMap is busy')
+  throw new Error(answeredEmpty ? 'Nothing found nearby' : 'OpenStreetMap is busy')
 }
 
 // ---------------------------------------------------------------- context ----
@@ -321,9 +337,9 @@ async function context(at: LatLng, signal?: AbortSignal): Promise<{ ctx: Explore
 
 // ---------------------------------------------------------------- scoring ----
 
-type OpenState = { state: 'open' | 'closing' | 'closed' | 'unknown'; text?: string }
+export type OpenState = { state: 'open' | 'closing' | 'closed' | 'unknown'; text?: string }
 
-function openAt(value: string | undefined, at: Date, OH: OpeningHours | null): OpenState {
+export function openAt(value: string | undefined, at: Date, OH: OpeningHours | null): OpenState {
   if (!value || !OH) return { state: 'unknown' }
   try {
     const oh = new OH(value, null)

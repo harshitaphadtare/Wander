@@ -3,6 +3,7 @@ import nearestPointOnLine from '@turf/nearest-point-on-line'
 import { useCallback, useMemo, useState } from 'react'
 import { distanceM, type LatLng } from '../lib/geo'
 import type { Route } from '../lib/routing'
+import { setItemSafe } from '../lib/storage'
 import type { Fix } from './useGeolocation'
 import type { WalkTarget } from './useWalkPlanner'
 
@@ -34,12 +35,17 @@ export function useActiveWalk(fix: Fix | null) {
   const [walk, setWalk] = useState<ActiveWalk | null>(load)
 
   const begin = useCallback((w: ActiveWalk) => {
-    localStorage.setItem(KEY, JSON.stringify(w))
+    // If even this can't be saved, the walk still runs; it just won't survive iOS closing the app.
+    setItemSafe(KEY, JSON.stringify(w))
     setWalk(w)
   }, [])
 
   const end = useCallback(() => {
-    localStorage.removeItem(KEY)
+    try {
+      localStorage.removeItem(KEY)
+    } catch {
+      /* storage blocked */
+    }
     setWalk(null)
   }, [])
 

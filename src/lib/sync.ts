@@ -1,7 +1,7 @@
 import type { Session } from '@supabase/supabase-js'
-import { onLocalChange } from './changes'
+import { notifyLocalChange, onLocalChange } from './changes'
 import { forgetKey, isSealed, keyFor, open, seal, type Sealed } from './crypto'
-import { db, getMeta, setMeta, SYNCED_TABLES, withoutDirty, type SyncedTable } from './db'
+import { db, getMeta, setMeta, SYNCED_TABLES, withoutDirty, type Photo, type SyncedTable } from './db'
 import { mergeRows } from './merge'
 import { syncPhotos } from './photoSync'
 import { supabase } from './supabase'
@@ -124,7 +124,15 @@ async function pull(key: CryptoKey) {
     for (const r of rows) {
       if (!SYNCED_TABLES.includes(r.table_name)) continue
       const isNew = isSealed(r.data)
-      const data = isNew ? await open<LocalRow>(key, r.table_name, r.id, r.data as Sealed) : (r.data as LocalRow)
+      let data: LocalRow
+      try {
+        data = isNew ? await open<LocalRow>(key, r.table_name, r.id, r.data as Sealed) : (r.data as LocalRow)
+      } catch (err) {
+        // One unreadable row (corrupt, or sealed with another key) must not stop every
+        // future sync at the same spot: skip it and keep going.
+        console.warn(`[wander] skipped an unreadable ${r.table_name} row ${r.id}`, err)
+        continue
+      }
       const bucket = isNew ? sealed : legacy
       const list = bucket.get(r.table_name) ?? []
       list.push({ ...data, id: r.id, updatedAt: r.updated_at, deleted: r.deleted ? 1 : 0 })
@@ -179,14 +187,69 @@ function scheduleSync(delay = 2_000) {
   debounce = setTimeout(() => void syncNow(), delay)
 }
 
+const stashKey = (userId: string) => `sync:stash:${userId}`
+
+interface Stash {
+  rows: Partial<Record<SyncedTable, LocalRow[]>>
+  photos: Photo[]
+}
+
 /**
- * If a different account signs in, re-upload everything and pull from scratch.
- * The same happens once for accounts that synced before encryption existed, so
- * their plaintext rows on the server get replaced with ciphertext.
+ * This device last synced a different account. Its data belongs to that person,
+ * so it must never be uploaded into the account signing in now. Anything they
+ * hadn't synced yet is stashed on the device (restored if they sign back in),
+ * then the local copy is cleared so this account starts from its own cloud data.
+ */
+async function switchAccount(previousUser: string) {
+  const tables = SYNCED_TABLES.map((t) => db.table(t))
+  await db.transaction('rw', [...tables, db.photos, db.meta], async () => {
+    const stash: Stash = { rows: {}, photos: await db.photos.filter((p) => p.uploaded !== 1).toArray() }
+    for (const t of SYNCED_TABLES) {
+      const dirty = (await db.table(t).where('dirty').equals(1).toArray()) as LocalRow[]
+      if (dirty.length) stash.rows[t] = dirty
+    }
+    if (stash.photos.length || Object.keys(stash.rows).length) await setMeta(stashKey(previousUser), stash)
+    for (const t of tables) await t.clear()
+    await db.photos.clear()
+    await setMeta('photos:pendingDeletes', [])
+  })
+  try {
+    localStorage.removeItem('wander:active-walk') // their walk in progress, not yours
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Put back what this account hadn't synced when someone else signed in on this device. */
+async function restoreStash(userId: string) {
+  const stash = await getMeta<Stash | null>(stashKey(userId), null)
+  if (!stash) return
+  for (const t of SYNCED_TABLES) if (stash.rows[t]?.length) await mergeRows(t, stash.rows[t]!, true)
+  if (stash.photos.length) await db.photos.bulkPut(stash.photos)
+  await db.meta.delete(stashKey(userId))
+  notifyLocalChange()
+}
+
+/**
+ * Signing in. Three cases:
+ *  - same account as last time: just sync;
+ *  - a different account than last time: clear this device first (switchAccount);
+ *  - first sign-in on this device, or the account predates encryption: upload
+ *    everything here into the account (guest data joins it; plaintext rows on the
+ *    server get replaced with ciphertext).
  */
 async function onSignedIn(s: Session) {
   const lastUser = await getMeta<string | null>('sync:userId', null)
   const encryptedFor = await getMeta<string | null>('sync:encryptedFor', null)
+  if (lastUser && lastUser !== s.user.id) {
+    await switchAccount(lastUser)
+    await setMeta('sync:pullCursor', null)
+    await setMeta('sync:userId', s.user.id)
+    await setMeta('sync:encryptedFor', s.user.id) // nothing local left to re-encrypt
+    await restoreStash(s.user.id)
+    await syncNow()
+    return
+  }
   if (lastUser !== s.user.id || encryptedFor !== s.user.id) {
     await db.transaction('rw', SYNCED_TABLES.map((t) => db.table(t)), async () => {
       for (const t of SYNCED_TABLES) await db.table(t).toCollection().modify({ dirty: 1 })
@@ -198,6 +261,15 @@ async function onSignedIn(s: Session) {
     return
   }
   void syncNow()
+}
+
+/**
+ * Push anything unsynced before signing out, so it isn't left behind on this
+ * device. Capped, so a bad connection never traps you signed in.
+ */
+export async function syncBeforeSignOut(maxMs = 8_000) {
+  if (!supabase || !session) return
+  await Promise.race([syncNow().catch(() => {}), new Promise((r) => setTimeout(r, maxMs))])
 }
 
 let started = false

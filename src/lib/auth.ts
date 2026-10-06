@@ -2,6 +2,7 @@ import type { Session } from '@supabase/supabase-js'
 import { useSyncExternalStore } from 'react'
 import { navigate } from './router'
 import { supabase } from './supabase'
+import { syncBeforeSignOut } from './sync'
 
 /**
  * Accounts (Supabase Auth). Passwords are never stored by Wander: Supabase
@@ -128,6 +129,7 @@ export function openAuth(view: 'signin' | 'signup' = 'signin') {
 }
 
 export async function signOut() {
+  await syncBeforeSignOut() // don't leave unsynced changes stranded on this device
   await supabase?.auth.signOut()
   navigate('/login', { replace: true })
 }

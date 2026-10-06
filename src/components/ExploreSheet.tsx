@@ -15,6 +15,7 @@ import {
   Mountain,
   Navigation,
   RefreshCw,
+  Route as RouteIcon,
   Shuffle,
   Sparkles,
   Sunset,
@@ -45,13 +46,18 @@ import {
 import { duration, timeOfDay } from '../lib/format'
 import type { LatLng } from '../lib/geo'
 import { isAbort } from '../lib/net'
+import { OutingError, outingMapsUrl, planOuting, type Outing } from '../lib/outing'
 import { currentPick, makePick, type PickPeriod } from '../lib/picks'
 import type { Route } from '../lib/routing'
 import { IconTile } from '../ui/bits'
 import { categoryIcon } from '../ui/icons'
 import Sheet from '../ui/Sheet'
 
-const MOODS: { key: Mood; label: string; blurb: string; icon: LucideIcon; color: string }[] = [
+/** Explore's moods, plus Outing (several stops joined into one walk; see lib/outing.ts). */
+type ViewMood = Mood | 'outing'
+
+const MOODS: { key: ViewMood; label: string; blurb: string; icon: LucideIcon; color: string }[] = [
+  { key: 'outing', label: 'Plan an outing', blurb: 'A few stops, one walk, timed to fit', icon: RouteIcon, color: '#0E9F8E' },
   { key: 'stroll', label: 'Stroll', blurb: 'A loop from here', icon: Footprints, color: '#12A187' },
   { key: 'new', label: 'Somewhere new', blurb: 'Parks, galleries, views', icon: Compass, color: '#2F7BF6' },
   { key: 'food', label: 'New food', blurb: 'Never eaten there', icon: UtensilsCrossed, color: '#E8457A' },
@@ -60,10 +66,11 @@ const MOODS: { key: Mood; label: string; blurb: string; icon: LucideIcon; color:
   { key: 'hike', label: 'Hike', blurb: 'Trails and lookouts', icon: Mountain, color: '#5B7F3A' },
   { key: 'surprise', label: 'Surprise me', blurb: 'One confident pick', icon: Wand2, color: '#7357F6' },
 ]
-const MOOD_BY_KEY = Object.fromEntries(MOODS.map((m) => [m.key, m])) as Record<Mood, (typeof MOODS)[number]>
+const MOOD_BY_KEY = Object.fromEntries(MOODS.map((m) => [m.key, m])) as Record<ViewMood, (typeof MOODS)[number]>
 
 /** What the status line says while a mood is loading. */
-const SEARCHING: Record<Mood, string> = {
+const SEARCHING: Record<ViewMood, string> = {
+  outing: 'Planning an outing',
   stroll: 'Drawing a loop from here',
   new: 'Looking for somewhere new',
   food: 'Finding places you haven’t eaten',
@@ -94,7 +101,7 @@ interface Props {
   onClose(): void
 }
 
-type Stage = { kind: 'moods' } | { kind: 'results'; mood: Mood }
+type Stage = { kind: 'moods' } | { kind: 'results'; mood: ViewMood }
 
 export default function ExploreSheet({ at, approximate, places, tiles, onShow, onCollapse, onFocus, onWalk, onSave, onClose }: Props) {
   const [collapsed, setCollapsedState] = useState(false)
@@ -106,6 +113,7 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
   const [time, setTime] = useState<TimeBudget>(60)
   const [reach, setReach] = useState<Reach>(1500)
   const [result, setResult] = useState<ExploreResult | null>(null)
+  const [outing, setOuting] = useState<Outing | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [slow, setSlow] = useState(false)
@@ -121,7 +129,7 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
   const mood = stage.kind === 'results' ? stage.mood : null
 
   const run = useCallback(
-    async (m: Mood, s: number, fresh: boolean) => {
+    async (m: ViewMood, s: number, fresh: boolean): Promise<void> => {
       if (!at) return
       ctrl.current?.abort()
       const c = new AbortController()
@@ -136,6 +144,17 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
       setError(null)
       const slowTimer = setTimeout(() => !c.signal.aborted && setSlow(true), 3_500)
       try {
+        if (m === 'outing') {
+          const o = await planOuting({ at, time, places, seed: s, exclude: shown.current, tiles, signal: c.signal })
+          if (c.signal.aborted) return
+          o.stops.forEach((st) => shown.current.add(st.pick.id))
+          setResult(null)
+          setOuting(o)
+          setLoading(false)
+          onShow({ picks: o.stops.map((st) => st.pick), loop: o.route })
+          return
+        }
+        setOuting(null)
         const r = await explore({ mood: m, at, time, reach, places, seed: s, exclude: shown.current, tiles, signal: c.signal })
         if (c.signal.aborted) return
         // Shuffle: when the pool runs dry, start over rather than showing nothing.
@@ -161,8 +180,20 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
       } catch (err) {
         if (isAbort(err) || c.signal.aborted) return
         const msg = (err as Error).message || ''
+        // Shuffled through everything: start the outing ideas over rather than giving up.
+        if (err instanceof OutingError && err.kind === 'none' && shown.current.size && !fresh) {
+          shown.current = new Set()
+          return run(m, s + 1, false)
+        }
+        // "Nothing here" isn't an outage: show the empty state with "More time" / "Further".
+        if (err instanceof OutingError || /Nothing found/i.test(msg)) {
+          setOuting(null)
+          setResult({ picks: [], pool: [], context: { rainy: false }, ai: false })
+          onShow({ picks: [], loop: null })
+          return
+        }
         setError(
-          /busy|Overpass|Nothing found/i.test(msg)
+          /busy|Overpass/i.test(msg)
             ? 'OpenStreetMap is busy right now. Give it a few seconds and try again.'
             : /fetch|network|load failed|timed out/i.test(msg)
               ? 'Couldn’t reach the map data. Check your connection and try again.'
@@ -184,9 +215,10 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
 
   useEffect(() => () => ctrl.current?.abort(), [])
 
-  const pickMood = (m: Mood) => {
+  const pickMood = (m: ViewMood) => {
     setCollapsed(false)
     setResult(null)
+    setOuting(null)
     setSeed(0)
     setStage({ kind: 'results', mood: m })
   }
@@ -195,6 +227,7 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
     ctrl.current?.abort()
     setStage({ kind: 'moods' })
     setResult(null)
+    setOuting(null)
     setError(null)
     setLoading(false)
     onShow({ picks: [], loop: null })
@@ -246,7 +279,9 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
   // One line that says what's on the map while the sheet is minimised.
   const summary = !collapsed
     ? undefined
-    : result?.loop
+    : outing
+      ? `${outing.stops.length} stops · ${duration(outing.totalMin * 60_000)} · done by ${timeOfDay(outing.endsAt.getTime())}`
+      : result?.loop
       ? `${(result.loop.distanceM / 1000).toFixed(1)} km loop · ${duration(result.loop.durationS * 1000)}`
       : picks.length
         ? `${picks.length} ${picks.length === 1 ? 'pick' : 'picks'} on the map · tap to see them`
@@ -268,10 +303,10 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
         ) : undefined
       }
       footer={
-        M && result && !loading && !error ? (
+        M && (result || outing) && !loading && !error ? (
           <div className="btn-row">
             <motion.button className="btn grow" onClick={shuffle} whileTap={{ scale: 0.97 }}>
-              <Shuffle size={17} strokeWidth={2.4} /> {mood === 'stroll' ? 'Another loop' : 'Shuffle'}
+              <Shuffle size={17} strokeWidth={2.4} /> {mood === 'stroll' ? 'Another loop' : mood === 'outing' ? 'Another outing' : 'Shuffle'}
             </motion.button>
           </div>
         ) : undefined
@@ -286,7 +321,7 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
             {MOODS.map((m, i) => (
               <motion.button
                 key={m.key}
-                className={`mood-tile ${m.key === 'surprise' ? 'wide' : ''}`}
+                className={`mood-tile ${m.key === 'surprise' || m.key === 'outing' ? 'wide' : ''}`}
                 style={{ '--c': m.color } as CSSProperties}
                 onClick={() => pickMood(m.key)}
                 initial={{ opacity: 0, y: 14, scale: 0.96 }}
@@ -313,7 +348,7 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
             reach={reach}
             onTime={setTime}
             onReach={setReach}
-            hideReach={mood === 'stroll'}
+            hideReach={mood === 'stroll' || mood === 'outing'}
             extra={result?.context && !loading ? <ContextChips ctx={result.context} ai={result.ai} /> : null}
           />
           {cuisines.length > 1 && !loading && (
@@ -372,6 +407,19 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
                   <RefreshCw size={15} /> Try again
                 </button>
               </motion.div>
+            ) : outing && at ? (
+              <OutingCard
+                key={`outing-${seed}`}
+                outing={outing}
+                from={at}
+                saved={saved}
+                onFocus={(p) => {
+                  setCollapsed(true)
+                  onFocus(p)
+                }}
+                onWalk={(p) => onWalk({ ...p, placeId: p.savedPlaceId })}
+                onSave={save}
+              />
             ) : result?.loop ? (
               <LoopCard key={`loop-${seed}`} loop={result.loop} weather={result.context.weather} />
             ) : result && picks.length === 0 ? (
@@ -386,7 +434,7 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
                       <Clock size={15} /> More time
                     </button>
                   )}
-                  {reach < 30000 && mood !== 'stroll' && (
+                  {reach < 30000 && mood !== 'stroll' && mood !== 'outing' && (
                     <button className="btn small" onClick={() => setReach(nextUp(REACH_OPTIONS, reach))}>
                       <MapPin size={15} /> Further
                     </button>
@@ -619,6 +667,100 @@ function PickCard({
         )}
       </div>
     </motion.li>
+  )
+}
+
+const ROLE_LABEL = { coffee: 'Coffee', food: 'A bite to eat', sight: '' } as const
+
+/** The outing as a timeline: when you'll reach each stop, how long to stay, and the walk between. */
+function OutingCard({
+  outing,
+  from,
+  saved,
+  onFocus,
+  onWalk,
+  onSave,
+}: {
+  outing: Outing
+  from: LatLng
+  saved: Set<string>
+  onFocus(p: ExplorePick): void
+  onWalk(p: ExplorePick): void
+  onSave(p: ExplorePick): Promise<void>
+}) {
+  const first = outing.stops[0].pick
+  return (
+    <motion.div className="outing" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+      <div className="loop-stats outing-stats">
+        <div>
+          <strong className="display">{duration(outing.totalMin * 60_000)}</strong>
+          <small>all in</small>
+        </div>
+        <div>
+          <strong className="display">{(outing.route.distanceM / 1000).toFixed(1)}</strong>
+          <small>km walking</small>
+        </div>
+        <div>
+          <strong className="display">{timeOfDay(outing.endsAt.getTime())}</strong>
+          <small>done by</small>
+        </div>
+      </div>
+
+      <ol className="outing-steps">
+        {outing.stops.map((st, i) => {
+          const isSaved = saved.has(st.pick.id) || !!st.pick.savedPlaceId
+          const kind = ROLE_LABEL[st.role] || cap(prettyKind(st.pick.category))
+          return (
+            <motion.li
+              key={st.pick.id}
+              className="outing-step"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 32, delay: 0.06 + i * 0.07 }}
+            >
+              <div className="outing-leg">
+                <Footprints size={13} strokeWidth={2.4} /> {st.walkMin} min walk
+              </div>
+              <div className="outing-stop">
+                <span className="outing-num">{i + 1}</span>
+                <button className="outing-main" onClick={() => onFocus(st.pick)} aria-label={`Show ${st.pick.name} on the map`}>
+                  <span className="outing-when">
+                    {timeOfDay(st.arriveAt.getTime())} · {kind} · {st.stayMin} min
+                  </span>
+                  <strong>{st.pick.name}</strong>
+                  <span className="outing-reason">{st.pick.reason}</span>
+                  {st.hours && <span className="fact open">{st.hours} when you arrive</span>}
+                </button>
+                <motion.button
+                  className="icon-btn"
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => onSave(st.pick)}
+                  disabled={isSaved}
+                  aria-label={isSaved ? 'Saved' : `Save ${st.pick.name} to want to go`}
+                >
+                  {isSaved ? <BookmarkCheck size={16} strokeWidth={2.4} /> : <Bookmark size={16} strokeWidth={2.4} />}
+                </motion.button>
+              </div>
+            </motion.li>
+          )
+        })}
+      </ol>
+
+      <div className="pick-actions">
+        <motion.a
+          className="btn small grow"
+          whileTap={{ scale: 0.96 }}
+          href={outingMapsUrl(from, outing.stops.map((st) => st.pick))}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <Navigation size={16} strokeWidth={2.4} /> Full route
+        </motion.a>
+        <motion.button className="btn small primary grow" whileTap={{ scale: 0.96 }} onClick={() => onWalk(first)}>
+          <Footprints size={16} strokeWidth={2.4} /> Start: {first.name}
+        </motion.button>
+      </div>
+    </motion.div>
   )
 }
 

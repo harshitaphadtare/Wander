@@ -55,7 +55,7 @@ export default function WrappedSheet({ visits, places, walks, streakWeeks, initi
   const maxDay = Math.max(1, ...w.byWeekday)
 
   return (
-    <Sheet onClose={onClose} eyebrow="Wander Wrapped" title={w.label}>
+    <Sheet onClose={onClose} eyebrow="Your recap" title={w.label}>
       <div className="wrapped-top">
         <Segmented<WrappedPeriod>
           id="wrapped-period"

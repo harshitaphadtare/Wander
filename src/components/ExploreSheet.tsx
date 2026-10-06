@@ -4,6 +4,7 @@ import {
   BookmarkCheck,
   CalendarDays,
   ChevronDown,
+  ChevronRight,
   Clock,
   CloudOff,
   CloudRain,
@@ -48,6 +49,7 @@ import type { LatLng } from '../lib/geo'
 import { isAbort } from '../lib/net'
 import { OutingError, outingMapsUrl, planOuting, type Outing } from '../lib/outing'
 import { currentPick, makePick, type PickPeriod } from '../lib/picks'
+import { nextSunset } from '../lib/sun'
 import type { Route } from '../lib/routing'
 import { IconTile } from '../ui/bits'
 import { categoryIcon } from '../ui/icons'
@@ -60,13 +62,44 @@ const MOODS: { key: ViewMood; label: string; blurb: string; icon: LucideIcon; co
   { key: 'outing', label: 'Plan an outing', blurb: 'A few stops, one walk, timed to fit', icon: RouteIcon, color: '#0E9F8E' },
   { key: 'stroll', label: 'Stroll', blurb: 'A loop from here', icon: Footprints, color: '#12A187' },
   { key: 'new', label: 'Somewhere new', blurb: 'Parks, galleries, views', icon: Compass, color: '#2F7BF6' },
-  { key: 'food', label: 'New food', blurb: 'Never eaten there', icon: UtensilsCrossed, color: '#E8457A' },
+  { key: 'food', label: 'Food & coffee', blurb: 'Somewhere new to eat or drink', icon: UtensilsCrossed, color: '#E8457A' },
   { key: 'coffee', label: 'Coffee break', blurb: 'Open now, close by', icon: Coffee, color: '#B5651D' },
   { key: 'sunset', label: 'Sunset spot', blurb: 'Before the light goes', icon: Sunset, color: '#F2542D' },
   { key: 'hike', label: 'Hike', blurb: 'Trails and lookouts', icon: Mountain, color: '#5B7F3A' },
   { key: 'surprise', label: 'Surprise me', blurb: 'One confident pick', icon: Wand2, color: '#7357F6' },
 ]
 const MOOD_BY_KEY = Object.fromEntries(MOODS.map((m) => [m.key, m])) as Record<ViewMood, (typeof MOODS)[number]>
+
+/** Just four choices on the first screen; the rest live inside them (see VARIANTS). */
+const TILES: ViewMood[] = ['outing', 'new', 'food', 'surprise']
+
+/**
+ * Close relatives of a mood, offered as chips once you're in it, instead of
+ * as more tiles up front: a stroll is an outing without stops; sunset spots and
+ * hikes are kinds of "somewhere new".
+ */
+const VARIANTS: { group: ViewMood; options: (readonly [ViewMood, string])[] }[] = [
+  { group: 'outing', options: [['outing', 'With stops'], ['stroll', 'Just a walk']] },
+  { group: 'new', options: [['new', 'Anything'], ['sunset', 'Sunset spot'], ['hike', 'Nature & hikes']] },
+]
+const variantsFor = (m: ViewMood) => VARIANTS.find((v) => v.options.some(([k]) => k === m))
+
+/** One suggestion that fits the moment, so the first tap is usually the right one. */
+function rightNow(at: LatLng, now = new Date()): { mood: ViewMood; time?: TimeBudget; title: string; text: string } {
+  const h = now.getHours() + now.getMinutes() / 60
+  const sunset = nextSunset(at, now)
+  const toSunset = sunset ? (sunset.getTime() - now.getTime()) / 60_000 : null
+  if (toSunset !== null && toSunset > 25 && toSunset < 120)
+    return { mood: 'sunset', title: 'Golden hour soon', text: `Sunset is at ${timeOfDay(sunset!.getTime())}. Find a spot to watch it.` }
+  if (h >= 6 && h < 11) return { mood: 'coffee', title: 'Morning coffee', text: 'A café close by that’s open now.' }
+  if ((h >= 11.5 && h < 14) || (h >= 17.5 && h < 20.5)) return { mood: 'food', title: 'Hungry?', text: 'Somewhere new to eat, nearby.' }
+  const weekend = now.getDay() === 0 || now.getDay() === 6
+  if (h >= 9 && h < 17.5)
+    return weekend
+      ? { mood: 'outing', time: 120, title: 'Free afternoon?', text: 'A two-hour outing: a few stops, one walk.' }
+      : { mood: 'outing', time: 60, title: 'Got an hour?', text: 'A short outing: somewhere new and a coffee.' }
+  return { mood: 'stroll', time: 30, title: 'Evening stroll', text: 'A short loop from where you are.' }
+}
 
 /** What the status line says while a mood is loading. */
 const SEARCHING: Record<ViewMood, string> = {
@@ -275,7 +308,9 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
     setSaved((s) => new Set(s).add(p.id))
   }
 
-  const M = mood ? MOOD_BY_KEY[mood] : null
+  const variants = mood ? variantsFor(mood) : undefined
+  // A sunset spot shows as "Somewhere new" with the Sunset chip on, and so on.
+  const M = mood ? MOOD_BY_KEY[variants?.group ?? mood] : null
   // One line that says what's on the map while the sheet is minimised.
   const summary = !collapsed
     ? undefined
@@ -316,9 +351,36 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
         <p className="body-muted">Finding where you are…</p>
       ) : stage.kind === 'moods' ? (
         <>
-          <FilterBar key="moods" time={time} reach={reach} onTime={setTime} onReach={setReach} />
+          {(() => {
+            const now = rightNow(at)
+            const N = MOOD_BY_KEY[now.mood]
+            return (
+              <motion.button
+                className="right-now"
+                style={{ '--c': N.color } as CSSProperties}
+                onClick={() => {
+                  if (now.time) setTime(now.time)
+                  pickMood(now.mood)
+                }}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                <span className="mood-icon">
+                  <N.icon size={22} strokeWidth={2.2} />
+                </span>
+                <span className="right-now-text">
+                  <small>Right now</small>
+                  <strong>{now.title}</strong>
+                  <span>{now.text}</span>
+                </span>
+                <ChevronRight size={20} strokeWidth={2.4} className="right-now-go" />
+              </motion.button>
+            )
+          })()}
+          <div className="list-label">Or pick a mood</div>
           <div className="mood-grid">
-            {MOODS.map((m, i) => (
+            {TILES.map((k) => MOOD_BY_KEY[k]).map((m, i) => (
               <motion.button
                 key={m.key}
                 className={`mood-tile ${m.key === 'surprise' || m.key === 'outing' ? 'wide' : ''}`}
@@ -338,7 +400,7 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
               </motion.button>
             ))}
           </div>
-          <ExploreNext at={at} places={places} tiles={tiles} onFocus={onFocus} onWalk={onWalk} onSave={onSave} />
+          <ExploreNext at={at} places={places} tiles={tiles} periods={['week']} label="This week’s picks" onFocus={onFocus} onWalk={onWalk} onSave={onSave} />
         </>
       ) : (
         <>
@@ -351,6 +413,15 @@ export default function ExploreSheet({ at, approximate, places, tiles, onShow, o
             hideReach={mood === 'stroll' || mood === 'outing'}
             extra={result?.context && !loading ? <ContextChips ctx={result.context} ai={result.ai} /> : null}
           />
+          {variants && (
+            <div className="chips scroll variant-chips" role="radiogroup" aria-label="Kind">
+              {variants.options.map(([k, label]) => (
+                <button key={k} role="radio" aria-checked={mood === k} className={`chip ${mood === k ? 'is-on solid' : ''}`} onClick={() => mood !== k && pickMood(k)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           {cuisines.length > 1 && !loading && (
             <motion.div className="chips scroll cuisine-chips" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} role="radiogroup" aria-label="Cuisine">
               <button role="radio" aria-checked={cuisine === null} className={`chip ${cuisine === null ? 'is-on solid' : ''}`} onClick={() => setCuisine(null)}>
@@ -646,15 +717,15 @@ function PickCard({
       <p className="pick-reason">{pick.reason}</p>
       <div className="fact-chips">
         {pick.facts.map((f) => (
-          <span key={f} className={`fact ${/^(Never been|On your wishlist)$/.test(f) ? 'new' : /^(Open|Closes)/.test(f) ? 'open' : ''}`}>
+          <span key={f} className={`fact ${/^(Never been|On your Want to go list)$/.test(f) ? 'new' : /^(Open|Closes)/.test(f) ? 'open' : ''}`}>
             {f}
           </span>
         ))}
       </div>
       <div className="pick-actions">
-        <motion.button className="btn small grow" whileTap={{ scale: 0.96 }} onClick={onSave} disabled={saved} aria-label={saved ? 'Saved' : 'Save to wishlist'}>
+        <motion.button className="btn small grow" whileTap={{ scale: 0.96 }} onClick={onSave} disabled={saved} aria-label={saved ? 'On your Want to go list' : 'Add to Want to go'}>
           {saved ? <BookmarkCheck size={16} strokeWidth={2.4} /> : <Bookmark size={16} strokeWidth={2.4} />}
-          {saved ? 'Saved' : 'Want to go'}
+          {saved ? 'On Want to go' : 'Want to go'}
         </motion.button>
         {pick.far ? (
           <motion.a className="btn small primary grow" whileTap={{ scale: 0.96 }} href={directionsUrl(pick, pick.name)} target="_blank" rel="noreferrer">
@@ -736,7 +807,7 @@ function OutingCard({
                   whileTap={{ scale: 0.9 }}
                   onClick={() => onSave(st.pick)}
                   disabled={isSaved}
-                  aria-label={isSaved ? 'Saved' : `Save ${st.pick.name} to want to go`}
+                  aria-label={isSaved ? 'On your Want to go list' : `Add ${st.pick.name} to Want to go`}
                 >
                   {isSaved ? <BookmarkCheck size={16} strokeWidth={2.4} /> : <Bookmark size={16} strokeWidth={2.4} />}
                 </motion.button>
@@ -794,16 +865,22 @@ function LoopCard({ loop, weather }: { loop: Route; weather?: string }) {
 
 // ---------------------------------------------------------------- Explore next ----
 
-const PERIODS: { key: PickPeriod; title: string; icon: LucideIcon }[] = [
+const ALL_PERIODS: { key: PickPeriod; title: string; icon: LucideIcon }[] = [
   { key: 'week', title: 'This week', icon: Sparkles },
   { key: 'month', title: 'This month', icon: CalendarDays },
   { key: 'year', title: 'This year', icon: Mountain },
 ]
 
-function ExploreNext({
+/**
+ * Suggestions kept for a week / month / year. Explore shows this week's;
+ * the You sheet's "Your map" shows the bigger month and year adventures.
+ */
+export function ExploreNext({
   at,
   places,
   tiles,
+  periods = ['week', 'month', 'year'],
+  label = 'Explore next',
   onFocus,
   onWalk,
   onSave,
@@ -811,10 +888,13 @@ function ExploreNext({
   at: LatLng
   places: PlaceWithStats[]
   tiles?: TilePois
+  periods?: PickPeriod[]
+  label?: string
   onFocus(at: LatLng): void
   onWalk: Props['onWalk']
   onSave: Props['onSave']
 }) {
+  const PERIODS = ALL_PERIODS.filter((p) => periods.includes(p.key))
   const [picks, setPicks] = useState<Partial<Record<PickPeriod, Pick | 'loading' | 'error'>>>({})
   const atRef = useRef(at)
   const placesRef = useRef(places)
@@ -847,18 +927,19 @@ function ExploreNext({
     // One after another, to go easy on the free servers; a beat first so a quick mood tap wins.
     const timer = setTimeout(() => {
       void (async () => {
-        for (const { key } of PERIODS) {
+        for (const key of periods) {
           if (ctrl.current.signal.aborted) return
           await load(key)
         }
       })()
     }, 400)
     return () => clearTimeout(timer)
+    // `periods` is fixed for each place this is used.
   }, [load])
 
   return (
     <section className="explore-next">
-      <div className="list-label">Explore next</div>
+      <div className="list-label">{label}</div>
       {PERIODS.map(({ key, title, icon: Icon }, i) => {
         const state = picks[key]
         return (
@@ -926,7 +1007,7 @@ function NextItem({
         {!far && (
           <button
             className="icon-btn"
-            aria-label={saved ? 'Saved' : 'Save to wishlist'}
+            aria-label={saved ? 'On your Want to go list' : 'Add to Want to go'}
             disabled={saved}
             onClick={async () => {
               await onSave(item)

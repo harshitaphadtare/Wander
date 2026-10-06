@@ -85,7 +85,7 @@ export default function PickPlaceSheet({ at, accuracy, mode, places, busy, nearb
     // The sheet is keyed by point, so this runs once per sheet; `places` is only for de-duplication.
   }, [])
 
-  const verb = mode === 'here' ? 'Check in' : 'Save'
+  const verb = mode === 'here' ? 'Check in' : 'Add'
   let i = 0
 
   return (

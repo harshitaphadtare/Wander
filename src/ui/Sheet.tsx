@@ -14,6 +14,8 @@ interface Props {
   children: ReactNode
   /** Sticks to the bottom of the sheet (primary actions). */
   footer?: ReactNode
+  /** Extra header buttons, shown before the close button (e.g. Settings, a ⋯ menu). */
+  actions?: ReactNode
   /** Minimisable sheets shrink to just their header so the map shows through. */
   collapsed?: boolean
   onToggleCollapse?(): void
@@ -26,7 +28,7 @@ const exitEase = { duration: 0.2, ease: [0.4, 0, 1, 1] } as const
  * Floating card sheet. Phones: rises from the bottom and can be flicked down
  * to dismiss. Wide screens: a side panel that slides in from the left.
  */
-export default function Sheet({ eyebrow, title, subtitle, leading, onClose, children, footer, collapsed = false, onToggleCollapse }: Props) {
+export default function Sheet({ eyebrow, title, subtitle, leading, actions, onClose, children, footer, collapsed = false, onToggleCollapse }: Props) {
   const desktop = useIsDesktop()
   const drag = useDragControls()
   /** A hairline under the header once the body scrolls, so content doesn't just vanish under the title. */
@@ -80,6 +82,11 @@ export default function Sheet({ eyebrow, title, subtitle, leading, onClose, chil
           <h2 className="display">{title}</h2>
           {subtitle && <p className="sheet-subtitle">{subtitle}</p>}
         </div>
+        {actions && (
+          <div className="sheet-actions" onPointerDown={(e) => e.stopPropagation()}>
+            {actions}
+          </div>
+        )}
         {onToggleCollapse && (
           <motion.button
             className="icon-btn"

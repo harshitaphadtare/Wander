@@ -1,4 +1,4 @@
-import { Beer, Coffee, Footprints, Navigation, Plus, RotateCw, Tag, UtensilsCrossed, X } from 'lucide-react'
+import { Beer, ChevronRight, Coffee, Footprints, Navigation, Plus, RotateCw, UtensilsCrossed, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useMemo, useState, type CSSProperties } from 'react'
 import type { WalkPlanner, WalkTarget } from '../hooks/useWalkPlanner'
@@ -32,6 +32,8 @@ interface Props {
 export default function WalkSheet({ target, planner, onStart, onClose }: Props) {
   const { route, base, stops, stop, setStop, arriveAt, routeError, stopsError, hoursStatus, retry, extraS, viaLoading } = planner
   const [filter, setFilter] = useState<Filter>('all')
+  /** Stops stay folded into one row until you want one: most walks don't need a detour. */
+  const [showStops, setShowStops] = useState(false)
 
   const visible = useMemo(() => (stops ?? []).filter((s) => filter === 'all' || s.group === filter), [stops, filter])
   const counts = useMemo(() => {
@@ -110,8 +112,32 @@ export default function WalkSheet({ target, planner, onStart, onClose }: Props) 
       {/* Stops along the way */}
       {base && (
         <section className="stops">
-          <div className="list-label">Stop on the way</div>
-          {stopsError ? (
+          {!showStops ? (
+            <motion.button className="add-stop" onClick={() => setShowStops(true)} whileTap={{ scale: 0.98 }} disabled={!stops?.length && !stopsError}>
+              <IconTile icon={Coffee} color="#A0612F" size={38} />
+              <span className="row-text">
+                <strong>{stop ? 'Change your stop' : 'Add a stop on the way'}</strong>
+                <small>
+                  {stopsError
+                    ? 'Couldn’t load places along the route'
+                    : stops === null
+                      ? 'Looking for cafés along the route…'
+                      : stops.length
+                        ? `${stops.length} cafés, restaurants and bars nearby`
+                        : 'Nothing right on this route'}
+                </small>
+              </span>
+              {stops === null && !stopsError ? <span className="spinner" /> : <ChevronRight size={18} strokeWidth={2.3} className="row-chev" />}
+            </motion.button>
+          ) : (
+            <div className="list-label stops-head">
+              Stop on the way
+              <button className="link-btn" onClick={() => setShowStops(false)}>
+                Hide
+              </button>
+            </div>
+          )}
+          {!showStops ? null : stopsError ? (
             <div className="error-card">
               <p>{stopsError}</p>
               <button className="btn small" onClick={retry}>
@@ -187,9 +213,6 @@ export default function WalkSheet({ target, planner, onStart, onClose }: Props) 
                   {filter === 'coffee' ? <Coffee size={14} /> : filter === 'food' ? <UtensilsCrossed size={14} /> : <Beer size={14} />}
                 </p>
               )}
-              <p className="eatclub-line">
-                <Tag size={14} strokeWidth={2.4} /> Eating out? Check EatClub for a deal before you go.
-              </p>
             </>
           )}
         </section>

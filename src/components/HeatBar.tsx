@@ -30,7 +30,7 @@ export default function HeatBar({ period, summary, onPeriod, onMode, onClose }: 
           <Flame size={17} strokeWidth={2.4} />
         </span>
         <span className="heat-bar-title">
-          <strong className="display">Your heatmap</strong>
+          <strong className="display">Where you go</strong>
           <AnimatePresence mode="wait" initial={false}>
             <motion.small
               key={`${period}-${summary.visits}`}
@@ -55,8 +55,8 @@ export default function HeatBar({ period, summary, onPeriod, onMode, onClose }: 
         value="heat"
         onChange={onMode}
         options={[
-          ['heat', 'Heatmap'],
-          ['fog', 'Explored'],
+          ['heat', 'Where you go'],
+          ['fog', 'How much explored'],
         ]}
       />
       <Segmented<Period> id="heat-period" value={period} onChange={onPeriod} options={PERIOD_OPTIONS} />

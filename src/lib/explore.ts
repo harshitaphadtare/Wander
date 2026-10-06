@@ -391,7 +391,7 @@ function fallbackReason(mood: Mood, p: Omit<ExplorePick, 'reason' | 'score'>, ct
   const cuisine = p.cuisine && (p.category === 'restaurant' || p.category === 'fast_food') ? p.cuisine.replace(/(^|\s)\w/g, (c) => c.toUpperCase()) : null
   const kind = cuisine ? `${cuisine} place` : prettyKind(p.category)
   const a = /^[aeiou]/i.test(kind) ? 'An' : 'A'
-  if (p.wishlist) return `It's been on your wishlist. Today's a good day for it.`
+  if (p.wishlist) return `It's on your Want to go list. Today's a good day for it.`
   switch (mood) {
     case 'coffee':
       return p.visits ? `An old favourite, ${p.far ? 'a short trip' : 'close by'}.` : `A café you haven't tried yet, close by.`
@@ -496,7 +496,7 @@ export async function explore(o: Options): Promise<ExploreResult> {
     score += jitter(c.id, seed) * 0.8
 
     const facts = [
-      visits === 0 ? (wishlist ? 'On your wishlist' : 'Never been') : `Been ${visits}×`,
+      visits === 0 ? (wishlist ? 'On your Want to go list' : 'Never been') : `Been ${visits}×`,
       far ? `${formatDistance(d)} away` : `${Math.max(1, mins)} min walk`,
       open.text,
     ].filter((f): f is string => !!f)

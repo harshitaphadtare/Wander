@@ -1,24 +1,23 @@
 import simplify from '@turf/simplify'
 import { lineString } from '@turf/helpers'
-import { Flame, LocateFixed } from 'lucide-react'
+import { LocateFixed } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Dock, { type Tab } from './components/Dock'
 import ExploreSheet, { type ExploreShow } from './components/ExploreSheet'
 import FogBar, { type MapMode } from './components/FogBar'
 import HeatBar from './components/HeatBar'
-import JournalPanel from './components/JournalPanel'
 import MapView, { type MapHandle, type Padding, type StopMarker } from './components/MapView'
 import NearbyPrompt, { DwellPrompt } from './components/NearbyPrompt'
 import PickPlaceSheet, { type PickChoice } from './components/PickPlaceSheet'
 import { ResultSheet, SavedPlaceSheet } from './components/PlaceSheet'
-import PlacesPanel from './components/PlacesPanel'
 import SearchBar from './components/SearchBar'
 import SettingsPanel from './components/SettingsPanel'
 import WalkBanner from './components/WalkBanner'
 import VisitSheet from './components/VisitSheet'
 import WalkSheet, { stopColor } from './components/WalkSheet'
 import WrappedSheet from './components/WrappedSheet'
+import YouSheet, { type YouSection } from './components/YouSheet'
 import './features.css'
 import { useActiveWalk } from './hooks/useActiveWalk'
 import { useAutoDetect } from './hooks/useAutoDetect'
@@ -37,6 +36,7 @@ import { levelFor } from './lib/levels'
 import type { PhotonPlace } from './lib/photon'
 import {
   countVisits,
+  deleteVisit,
   endVisit,
   findNearbyPlaces,
   finishWalk,
@@ -56,8 +56,8 @@ type SheetState =
   | { type: 'result'; result: PhotonPlace }
   | { type: 'pick'; mode: 'here' | 'pin'; at: LatLng; accuracy?: number }
   | { type: 'walk'; target: WalkTarget; origin: LatLng }
-  | { type: 'places' }
-  | { type: 'journal' }
+  /** The You tab: your places, journal, and progress ("Your map"). */
+  | { type: 'you'; section: YouSection }
   | { type: 'explore' }
   /** `fresh`: just checked in, so the sheet leads with "add photos, a note, steps". */
   | { type: 'visit'; id: string; fresh?: boolean }
@@ -141,6 +141,8 @@ export default function App() {
   const [fogAt, setFogAt] = useState<LatLng | null>(null)
   const [exploreShow, setExploreShow] = useState<ExploreShow>({ picks: [], loop: null })
   const [exploreCollapsed, setExploreCollapsed] = useState(false)
+  /** Which part of the You tab was open last, so the tab reopens where you left it. */
+  const [youSection, setYouSection] = useState<YouSection>('places')
   const pendingLocate = useRef(false)
   const tilePois = useCallback(
     (coords: [number, number][], radiusM: number) => map.current?.poisAlong(coords, radiusM) ?? Promise.resolve([]),
@@ -193,8 +195,8 @@ export default function App() {
     geo.start()
   }
 
-  /** Log a visit with sanity checks, then celebrate any level-up. */
-  const checkIn = async (placeId: string, name: string, at: LatLng) => {
+  /** Log a visit with sanity checks, then celebrate any level-up. `undo` offers an Undo on the confirmation. */
+  const checkIn = async (placeId: string, name: string, at: LatLng, opts: { undo?: boolean } = {}) => {
     if (here) {
       const away = distanceM(here, at)
       if (
@@ -224,7 +226,22 @@ export default function App() {
     navigator.vibrate?.(20)
     if (newLevel.key !== oldLevel.key && after >= 2) {
       setCelebration({ id: Date.now(), level: newLevel, placeName: name, visits: after })
-    } else {
+    }
+    if (opts.undo) {
+      setToast({
+        id: Date.now(),
+        text: `Checked in at ${name}`,
+        tone: 'success',
+        action: {
+          label: 'Undo',
+          onClick: () => {
+            void deleteVisit(visit.id)
+            setSheet(null)
+            notify('Check-in undone')
+          },
+        },
+      })
+    } else if (newLevel.key === oldLevel.key || after < 2) {
       notify(`Checked in at ${name}`, 'success')
     }
     setDwellSpot(null)
@@ -265,6 +282,15 @@ export default function App() {
           return
         }
       }
+      // Clearly at one of your places? Check straight in (with Undo) instead of asking.
+      if (accuracy <= 50) {
+        const [first, second] = await findNearbyPlaces(at, 40)
+        if (first && (!second || second.distance > first.distance * 2 + 15)) {
+          flyTo(first.place, true, 17)
+          await checkIn(first.place.id, first.place.name, first.place, { undo: true })
+          return
+        }
+      }
       setSheet({ type: 'pick', mode: 'here', at, accuracy })
       flyTo(at, true, 17)
     })
@@ -275,7 +301,7 @@ export default function App() {
       if (mode === 'here') {
         await checkIn(place.id, place.name, place)
       } else {
-        notify(`Saved ${place.name}`, 'success')
+        notify(`Added ${place.name} to Want to go`, 'success')
         setSheet({ type: 'place', id: place.id })
       }
     })
@@ -285,7 +311,7 @@ export default function App() {
       const place = await savePlace(input)
       if (andCheckIn) await checkIn(place.id, place.name, place)
       else {
-        notify(`Saved ${place.name}`, 'success')
+        notify(`Added ${place.name} to Want to go`, 'success')
         setSheet({ type: 'place', id: place.id })
       }
     })
@@ -550,9 +576,18 @@ export default function App() {
   }, [sheet])
 
   const close = () => setSheet(null)
-  const tab: Tab | null = sheet?.type === 'places' || sheet?.type === 'journal' || sheet?.type === 'explore' ? sheet.type : null
+  const tab: Tab | null =
+    sheet?.type === 'explore' ? 'explore' : sheet?.type === 'you' || sheet?.type === 'settings' ? 'you' : null
   const mapMode = heatOn || !!fogAt
-  const toggleTab = (t: Tab) => setSheet(tab === t ? null : { type: t })
+  const openYou = (section: YouSection = youSection) => {
+    setYouSection(section)
+    setSheet({ type: 'you', section })
+  }
+  const toggleTab = (t: Tab) => {
+    if (tab === t) setSheet(null)
+    else if (t === 'you') openYou()
+    else setSheet({ type: 'explore' })
+  }
   const showNearby = !!nearbyPlace && !sheet && !mapMode
   const showDwell = !showNearby && !!dwellSpot && !sheet && !mapMode
 
@@ -605,20 +640,38 @@ export default function App() {
         )
       case 'walk':
         return <WalkSheet key={sheetKey(sheet)} target={sheet.target} planner={planner} onStart={beginWalk} onClose={close} />
-      case 'places':
-        return <PlacesPanel key="places" places={allPlaces} lists={lists ?? []} from={here} onPick={openPlace} onClose={close} />
-      case 'journal':
+      case 'you':
         return (
-          <JournalPanel
-            key="journal"
-            visits={visits ?? []}
+          <YouSheet
+            key="you"
+            section={sheet.section}
+            onSection={openYou}
             places={allPlaces}
+            lists={lists ?? []}
+            visits={visits ?? []}
+            from={here}
             period={period}
             onPeriod={setPeriod}
-            onHeatmap={openHeat}
+            onPick={openPlace}
             onVisit={(id) => setSheet({ type: 'visit', id })}
-            onWrapped={() => setSheet({ type: 'wrapped', period: period === 'year' || period === 'all' ? 'year' : 'month' })}
+            onSettings={() => setSheet({ type: 'settings' })}
             onClose={close}
+            map={{
+              at: here ?? map.current?.getCenter() ?? null,
+              tiles: poisNear,
+              onHeatmap: openHeat,
+              onExplored: openFog,
+              onRecap: (p) => setSheet({ type: 'wrapped', period: p }),
+              onFocus: (at) => {
+                setSheet(null)
+                flyTo(at, false, 13)
+              },
+              onWalk: (t) => walkTo(t),
+              onSave: async (input) => {
+                await savePlace(input)
+                notify(`Added ${input.name} to Want to go`, 'success')
+              },
+            }}
           />
         )
       case 'explore':
@@ -664,7 +717,7 @@ export default function App() {
             walks={walks ?? []}
             streakWeeks={streakWeeks}
             initial={sheet.period}
-            onClose={close}
+            onClose={() => openYou('map')}
           />
         )
       case 'settings':
@@ -676,7 +729,7 @@ export default function App() {
             autoDetect={autoDetect}
             onAutoDetect={setAuto}
             notify={notify}
-            onClose={close}
+            onClose={() => openYou()}
           />
         )
       default:
@@ -745,8 +798,6 @@ export default function App() {
           setSheet({ type: 'result', result: r })
           flyTo(r)
         }}
-          onOpenSettings={() => setSheet(sheet?.type === 'settings' ? null : { type: 'settings' })}
-          nearbyFromMap={poisNear}
         />
       )}
 
@@ -758,23 +809,6 @@ export default function App() {
       >
         <LocateFixed size={21} strokeWidth={2.2} />
       </motion.button>
-
-      {!active.walk && (
-        <motion.button
-          className={`fab heat glass ${mapMode ? 'is-on' : ''}`}
-          onClick={() => {
-            if (mapMode) {
-              setHeatOn(false)
-              setFogAt(null)
-            } else openHeat()
-          }}
-          aria-label={mapMode ? 'Hide heatmap' : 'Show heatmap and explored %'}
-          aria-pressed={mapMode}
-          whileTap={{ scale: 0.9 }}
-        >
-          <Flame size={21} strokeWidth={2.2} />
-        </motion.button>
-      )}
 
       <AnimatePresence>
         {showNearby && (

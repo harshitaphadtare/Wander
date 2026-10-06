@@ -33,7 +33,7 @@ export default function FogBar({ fog, onMode, onClose }: Props) {
           </strong>
           <small>
             {fog.suburb
-              ? `${fog.explored} of ${fog.total} blocks explored`
+              ? `You’ve been around ${fog.explored} of its ${fog.total} blocks`
               : `${fog.explored} of ${fog.total} blocks within ${FOG_RADIUS_M / 1000} km`}
           </small>
         </span>
@@ -46,8 +46,8 @@ export default function FogBar({ fog, onMode, onClose }: Props) {
         value="fog"
         onChange={onMode}
         options={[
-          ['heat', 'Heatmap'],
-          ['fog', 'Explored'],
+          ['heat', 'Where you go'],
+          ['fog', 'How much explored'],
         ]}
       />
       <div className="fog-progress" aria-hidden>

@@ -16,7 +16,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useMemo, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import type { Timing, WalkPlanner } from '../hooks/useWalkPlanner'
 import { useWeather } from '../hooks/useWeather'
 import { duration, startOfDay, timeOfDay } from '../lib/format'
@@ -79,6 +79,8 @@ interface Props {
 export default function WalkTiming({ planner, at }: Props) {
   const { timing, setTiming, leaveAt, arriveAt, arriveBy, sunset, now } = planner
   const mode: Mode = timing.mode === 'sunset' ? 'arrive' : timing.mode
+  /** Most walks start now: one line until you ask to change the time. */
+  const [open, setOpen] = useState(timing.mode !== 'now')
 
   const setMode = (m: Mode) => {
     if (m === mode) return
@@ -86,6 +88,10 @@ export default function WalkTiming({ planner, at }: Props) {
     else if (m === 'leave') setTiming({ mode: 'leave', at: roundedAhead(now, 15) })
     // Sunset is the classic "arrive by"; fall back to an hour from now.
     else setTiming(sunset ? { mode: 'sunset' } : { mode: 'arrive', at: roundedAhead(now, 60) })
+  }
+
+  if (!open) {
+    return <CompactTiming at={at} from={leaveAt.getTime()} to={arriveAt?.getTime() ?? null} onChange={() => setOpen(true)} />
   }
 
   return (
@@ -145,6 +151,34 @@ export default function WalkTiming({ planner, at }: Props) {
 
       <WeatherStrip at={at} from={leaveAt.getTime()} to={arriveAt?.getTime() ?? null} sunset={sunset} />
     </section>
+  )
+}
+
+/** "Leaving now · Partly cloudy, 16°" with a Change time link: the whole timing section, folded. */
+function CompactTiming({ at, from, to, onChange }: { at: LatLng; from: number; to: number | null; onChange(): void }) {
+  const forecast = useWeather(at)
+  const { hour, advice } = useMemo(() => {
+    if (!Array.isArray(forecast)) return { hour: null, advice: null }
+    const end = to ?? from
+    return {
+      hour: forecast.find((h) => h.t + 3_600_000 > from) ?? null,
+      advice: walkAdvice(forecast.filter((h) => h.t + 3_600_000 > from && h.t <= end)),
+    }
+  }, [forecast, from, to])
+  const Icon = hour ? SKY_ICON[hour.sky][hour.isDay ? 0 : 1] : AlarmClock
+  return (
+    <div className="timing-compact">
+      <span className="timing-compact-icon" aria-hidden>
+        <Icon size={18} strokeWidth={2.2} />
+      </span>
+      <span className="row-text">
+        <strong>Leaving now</strong>
+        <small>{advice ?? (hour ? `${SKY_LABEL[hour.sky]}, ${Math.round(hour.tempC)}°` : forecast === 'error' ? 'Weather unavailable' : 'Checking the weather…')}</small>
+      </span>
+      <button className="link-btn" onClick={onChange}>
+        Change time
+      </button>
+    </div>
   )
 }
 

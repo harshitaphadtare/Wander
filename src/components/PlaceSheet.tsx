@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Bookmark, Camera, Check, ChevronRight, Footprints, MapPinPlus, Pencil, Tag, Trash } from 'lucide-react'
+import { Bookmark, Camera, Check, ChevronRight, Ellipsis, Footprints, MapPinPlus, Pencil, Tag, Trash } from 'lucide-react'
 import { AnimatePresence } from 'motion/react'
 import { motion } from 'motion/react'
 import { useState } from 'react'
@@ -10,7 +10,7 @@ import { distanceM, formatDistance, type LatLng } from '../lib/geo'
 import { nextLevel } from '../lib/levels'
 import { isFoodPlace, prettyCategory, type PhotonPlace } from '../lib/photon'
 import { deletePlace, renamePlace } from '../lib/places'
-import { CountUp, IconTile, ProgressRing } from '../ui/bits'
+import { IconTile, ProgressRing } from '../ui/bits'
 import { useConfirm } from '../ui/Confirm'
 import { categoryIcon, LEVEL_ICONS } from '../ui/icons'
 import { PhotoCarousel, PhotoViewer } from '../ui/Photos'
@@ -63,6 +63,7 @@ export function SavedPlaceSheet({ place, from, lists, busy, onVisit, onCheckIn, 
   const photos = usePlacePhotos(place.id)
   const memories = photos.map((p) => ({ id: p.photo.id, url: p.url, label: shortDate(p.at) }))
   const [viewing, setViewing] = useState<number | null>(null)
+  const [menu, setMenu] = useState(false)
   const totalSteps = useLiveQuery(
     () =>
       db.visits
@@ -102,7 +103,7 @@ export function SavedPlaceSheet({ place, from, lists, busy, onVisit, onCheckIn, 
     <Sheet
       onClose={onClose}
       leading={<IconTile icon={categoryIcon(place.category)} color={place.level.color} size={48} />}
-      eyebrow={[place.visitCount === 0 ? 'Want to go' : null, metaLine(place.category, from, place)].filter(Boolean).join(' · ') || 'Saved place'}
+      eyebrow={[place.visitCount === 0 ? 'Want to go' : null, metaLine(place.category, from, place)].filter(Boolean).join(' · ') || 'Your place'}
       title={
         editing ? (
           <form
@@ -125,11 +126,47 @@ export function SavedPlaceSheet({ place, from, lists, busy, onVisit, onCheckIn, 
         )
       }
       subtitle={place.address}
+      actions={
+        <div className="menu-wrap">
+          <motion.button className="icon-btn" onClick={() => setMenu(!menu)} whileTap={{ scale: 0.88 }} aria-label="More" aria-expanded={menu}>
+            <Ellipsis size={18} strokeWidth={2.4} />
+          </motion.button>
+          <AnimatePresence>
+            {menu && (
+              <motion.div
+                className="menu-pop"
+                role="menu"
+                initial={{ opacity: 0, y: -6, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.96, transition: { duration: 0.12 } }}
+                transition={{ type: 'spring', stiffness: 520, damping: 34 }}
+              >
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false)
+                    setEditing(true)
+                  }}
+                >
+                  <Pencil size={15} strokeWidth={2.3} /> Rename
+                </button>
+                <button
+                  role="menuitem"
+                  className="danger"
+                  onClick={() => {
+                    setMenu(false)
+                    void remove()
+                  }}
+                >
+                  <Trash size={15} strokeWidth={2.3} /> Remove place
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      }
       footer={
         <div className="btn-row">
-          <motion.button className="btn square" onClick={remove} whileTap={{ scale: 0.94 }} aria-label="Remove place">
-            <Trash size={18} strokeWidth={2.2} />
-          </motion.button>
           <motion.button className="btn grow" onClick={onWalk} disabled={busy} whileTap={{ scale: 0.97 }}>
             <Footprints size={18} strokeWidth={2.3} /> Walk here
           </motion.button>
@@ -163,43 +200,21 @@ export function SavedPlaceSheet({ place, from, lists, busy, onVisit, onCheckIn, 
         </section>
       )}
 
-      <div className="stat-cards">
-        <div className="stat-card">
-          <span className="level-badge" style={{ '--c': place.level.color } as React.CSSProperties}>
-            <LevelIcon size={13} strokeWidth={2.6} /> {place.level.label}
-          </span>
-          <small>Level</small>
-        </div>
-        <div className="stat-card">
-          <strong className="display num">
-            <CountUp value={place.visitCount} />
+      {/* Level, visits and the next level in one line. */}
+      <div className="level-line" style={{ '--c': place.level.color } as React.CSSProperties}>
+        <ProgressRing value={next ? place.visitCount / next.min : 1} color={next?.color ?? place.level.color} size={46}>
+          <LevelIcon size={17} strokeWidth={2.4} color={place.level.color} />
+        </ProgressRing>
+        <div>
+          <strong>
+            {place.level.label} · {plural(place.visitCount, 'visit')}
           </strong>
-          <small>{place.visitCount === 1 ? 'Visit' : 'Visits'}</small>
-        </div>
-        <div className="stat-card">
-          <strong className="stat-text">{place.lastVisitAt ? relativeTime(place.lastVisitAt) : 'Not yet'}</strong>
-          <small>Last visit</small>
+          <small>
+            {place.lastVisitAt ? `Last ${relativeTime(place.lastVisitAt)}` : 'Not visited yet'}
+            {next ? ` · ${plural(next.min - place.visitCount, 'more visit')} to ${next.label}` : ''}
+          </small>
         </div>
       </div>
-
-      {next && (
-        <div className="progress-card">
-          <ProgressRing value={place.visitCount / next.min} color={next.color} size={52}>
-            {(() => {
-              const NextIcon = LEVEL_ICONS[next.key]
-              return <NextIcon size={18} strokeWidth={2.4} color={next.color} />
-            })()}
-          </ProgressRing>
-          <div>
-            <strong>
-              {plural(next.min - place.visitCount, 'more visit')} to {next.label}
-            </strong>
-            <small>
-              {place.visitCount} of {next.min} visits
-            </small>
-          </div>
-        </div>
-      )}
 
       {!!totalSteps && (
         <div className="steps-total">
@@ -266,7 +281,7 @@ export function ResultSheet({ result, from, busy, onCheckIn, onSave, onWalk, onC
       subtitle={result.address}
       footer={
         <div className="btn-row">
-          <motion.button className="btn square" onClick={onSave} disabled={busy} whileTap={{ scale: 0.94 }} aria-label="Save to wishlist">
+          <motion.button className="btn square" onClick={onSave} disabled={busy} whileTap={{ scale: 0.94 }} aria-label="Add to Want to go">
             <Bookmark size={18} strokeWidth={2.3} />
           </motion.button>
           <motion.button className="btn grow" onClick={onWalk} disabled={busy} whileTap={{ scale: 0.97 }}>
@@ -278,7 +293,7 @@ export function ResultSheet({ result, from, busy, onCheckIn, onSave, onWalk, onC
         </div>
       }
     >
-      <p className="body-muted">Not in your places yet. Bookmark it for your wishlist, or check in when you're here.</p>
+      <p className="body-muted">Not in your places yet. Add it to Want to go for later, or check in when you're here.</p>
       <EatClubNote category={result.category} />
     </Sheet>
   )

@@ -70,25 +70,6 @@ export async function searchPlaces(query: string, near?: LatLng, signal?: AbortS
   return kept
 }
 
-/**
- * Places of one kind near a point (e.g. cafés), nearest first.
- * `tags` are OSM key:value pairs; Photon ORs multiple osm_tag filters.
- */
-export async function searchNearbyCategory(
-  q: string,
-  tags: string[],
-  near: LatLng,
-  signal?: AbortSignal,
-): Promise<PhotonPlace[]> {
-  const params = new URLSearchParams({ q, limit: '20', lang: 'en', lat: near.lat.toFixed(3), lon: near.lng.toFixed(3) }) // ~100 m is enough to rank nearby results
-  for (const t of tags) params.append('osm_tag', t)
-  const res = await fetch(`${BASE}/api/?${params}`, { signal })
-  if (!res.ok) throw new Error(`Search failed (${res.status})`)
-  const data = (await res.json()) as { features: PhotonFeature[] }
-  const dist = (p: PhotonPlace) => Math.hypot(p.lat - near.lat, (p.lng - near.lng) * Math.cos((near.lat * Math.PI) / 180))
-  return data.features.map(toPlace).sort((a, b) => dist(a) - dist(b))
-}
-
 /** Named things near a point, nearest first. */
 export async function reverseGeocode(at: LatLng, signal?: AbortSignal): Promise<PhotonPlace[]> {
   const params = new URLSearchParams({

@@ -10,7 +10,6 @@ import { createList, deleteList, renameList } from '../lib/places'
 import { useConfirm } from '../ui/Confirm'
 import { EmptyState, IconTile, Segmented, Stagger } from '../ui/bits'
 import { categoryIcon, LEVEL_ICONS } from '../ui/icons'
-import Sheet from '../ui/Sheet'
 
 type Filter = 'all' | 'favourites' | 'unvisited'
 type Sort = 'visits' | 'recent' | 'nearest' | 'name'
@@ -22,10 +21,10 @@ interface Props {
   lists: List[]
   from: LatLng | null
   onPick(place: PlaceWithStats): void
-  onClose(): void
 }
 
-export default function PlacesPanel({ places, lists, from, onPick, onClose }: Props) {
+/** Your places: filters, lists and the list itself. Lives in the You sheet. */
+export default function PlacesBody({ places, lists, from, onPick }: Props) {
   const confirm = useConfirm()
   const [filter, setFilter] = useState<Filter>('all')
   const [sort, setSort] = useState<Sort>('visits')
@@ -48,16 +47,11 @@ export default function PlacesPanel({ places, lists, from, onPick, onClose }: Pr
     return filtered.sort(by[sort])
   }, [places, filter, sort, from, activeList])
 
-  const favCount = places.filter((p) => p.visitCount >= 2).length
   const sorts: Sort[] = from ? ['visits', 'recent', 'nearest', 'name'] : ['visits', 'recent', 'name']
   const cycleSort = () => setSort(sorts[(sorts.indexOf(sort) + 1) % sorts.length])
 
   return (
-    <Sheet
-      onClose={onClose}
-      eyebrow={`${plural(places.length, 'place')} · ${plural(favCount, 'favourite')}`}
-      title="Your places"
-    >
+    <>
       {places.length > 0 && (
         <Segmented<Filter>
           id="places-filter"
@@ -209,6 +203,6 @@ export default function PlacesPanel({ places, lists, from, onPick, onClose }: Pr
           })}
         </div>
       </section>
-    </Sheet>
+    </>
   )
 }

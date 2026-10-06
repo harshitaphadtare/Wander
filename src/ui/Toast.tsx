@@ -6,6 +6,8 @@ export interface ToastMessage {
   id: number
   text: string
   tone?: 'info' | 'success' | 'error'
+  /** One quick follow-up, e.g. Undo. Toasts with an action stay up a little longer. */
+  action?: { label: string; onClick(): void }
 }
 
 const ICONS = { info: Info, success: Check, error: CircleAlert }
@@ -14,7 +16,7 @@ const ICONS = { info: Info, success: Check, error: CircleAlert }
 export default function Toast({ toast, onDone }: { toast: ToastMessage | null; onDone(): void }) {
   useEffect(() => {
     if (!toast) return
-    const t = setTimeout(onDone, toast.tone === 'error' ? 5000 : 3000)
+    const t = setTimeout(onDone, toast.tone === 'error' || toast.action ? 5500 : 3000)
     return () => clearTimeout(t)
   }, [toast, onDone])
 
@@ -35,7 +37,19 @@ export default function Toast({ toast, onDone }: { toast: ToastMessage | null; o
           <span className="toast-icon">
             <Icon size={15} strokeWidth={2.6} />
           </span>
-          {toast.text}
+          <span className="toast-text">{toast.text}</span>
+          {toast.action && (
+            <button
+              className="toast-action"
+              onClick={(e) => {
+                e.stopPropagation()
+                toast.action!.onClick()
+                onDone()
+              }}
+            >
+              {toast.action.label}
+            </button>
+          )}
         </motion.div>
       )}
     </AnimatePresence>

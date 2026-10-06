@@ -1,7 +1,7 @@
-import { BookOpen, Bookmark, Compass, MapPinPlus, type LucideIcon } from 'lucide-react'
+import { CircleUserRound, Compass, MapPinPlus, type LucideIcon } from 'lucide-react'
 import { motion } from 'motion/react'
 
-export type Tab = 'explore' | 'places' | 'journal'
+export type Tab = 'explore' | 'you'
 
 interface Props {
   tab: Tab | null
@@ -22,7 +22,10 @@ function DockTab({ icon: Icon, label, active, onClick }: { icon: LucideIcon; lab
   )
 }
 
-/** Floating glass dock: Explore · Places · Check in · Journal. */
+/**
+ * Floating glass dock with just three things: Explore (find somewhere),
+ * Check in (the main action), and You (your places, journal, progress, settings).
+ */
 export default function Dock({ tab, busy, onTab, onCheckIn }: Props) {
   return (
     <motion.nav
@@ -33,7 +36,6 @@ export default function Dock({ tab, busy, onTab, onCheckIn }: Props) {
       transition={{ type: 'spring', stiffness: 300, damping: 30, delay: 0.1 }}
     >
       <DockTab icon={Compass} label="Explore" active={tab === 'explore'} onClick={() => onTab('explore')} />
-      <DockTab icon={Bookmark} label="Places" active={tab === 'places'} onClick={() => onTab('places')} />
       <motion.button
         className="dock-primary"
         onClick={onCheckIn}
@@ -44,7 +46,7 @@ export default function Dock({ tab, busy, onTab, onCheckIn }: Props) {
         <MapPinPlus size={20} strokeWidth={2.4} />
         <span>Check in</span>
       </motion.button>
-      <DockTab icon={BookOpen} label="Journal" active={tab === 'journal'} onClick={() => onTab('journal')} />
+      <DockTab icon={CircleUserRound} label="You" active={tab === 'you'} onClick={() => onTab('you')} />
     </motion.nav>
   )
 }

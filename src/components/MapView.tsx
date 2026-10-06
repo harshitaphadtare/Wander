@@ -1,5 +1,5 @@
 import * as maplibregl from 'maplibre-gl'
-import type { GeoJSONSource, Map as MLMap } from 'maplibre-gl'
+import type { GeoJSONSource, Map as MLMap, StyleSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 // MapLibre 6 loads its worker from a separate file; let Vite bundle it and hand over the URL.
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
@@ -200,13 +200,18 @@ export default function MapView({
     const view = savedView()
     const map = new maplibregl.Map({
       container: container.current!,
-      style: STYLE_URL,
       center: view?.center ?? DEFAULT_CENTER,
       zoom: view?.zoom ?? 13,
       attributionControl: false,
       dragRotate: false,
       pitchWithRotate: false,
       fadeDuration: 200,
+    })
+    map.setStyle(STYLE_URL, { transformStyle: (_, next) => quietStyle(next) })
+    // Liberty references icons its sprite doesn't have (atm, recycling, gate…), and
+    // MapLibre warns once per icon. Those POIs had no icon anyway: give them a blank one.
+    map.setMissingStyleImageResolver((id) => {
+      if (!map.hasImage(id)) map.addImage(id, { width: 1, height: 1, data: new Uint8Array(4) })
     })
     map.touchZoomRotate.disableRotation()
     // Bottom-left: the right edge belongs to the heatmap and locate buttons.
@@ -515,6 +520,24 @@ const FOOD_CLASSES = ['cafe', 'restaurant', 'fast_food', 'bakery', 'ice_cream', 
  * Liberty tweaks: flat buildings instead of 3D blocks, and a food layer so cafés
  * and restaurants show from neighbourhood zoom (Liberty hides most until z16–17).
  */
+/**
+ * Liberty's road-shield layers compare `ref_length` with a number, but most
+ * roads don't have one, so MapLibre warns "Expected number, found null" for
+ * every tile. Default the missing value so the filter is simply false.
+ */
+function quietStyle(style: StyleSpecification): StyleSpecification {
+  const fix = (expr: unknown): unknown =>
+    Array.isArray(expr)
+      ? expr.length === 2 && expr[0] === 'get' && expr[1] === 'ref_length'
+        ? ['coalesce', expr, 99]
+        : expr.map(fix)
+      : expr
+  return {
+    ...style,
+    layers: style.layers.map((l) => ('filter' in l && l.filter && /shield/.test(l.id) ? ({ ...l, filter: fix(l.filter) } as typeof l) : l)),
+  }
+}
+
 function tuneBaseStyle(map: MLMap) {
   if (map.getLayer('building-3d')) map.setLayoutProperty('building-3d', 'visibility', 'none')
   if (map.getLayer('building')) map.setLayerZoomRange('building', 13, 24)

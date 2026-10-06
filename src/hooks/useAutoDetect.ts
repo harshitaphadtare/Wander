@@ -9,24 +9,33 @@ const MAX_ACCURACY_M = 100
 /** Phones often stop sending fixes while you stand still, so also re-check on a timer. */
 const CHECK_EVERY_MS = 30_000
 /** Trust the last fix as "still here" for this long without a new one. */
-const MAX_FIX_AGE_MS = 15 * 60 * 1000
+const MAX_FIX_AGE_MS = 3 * 60 * 1000
+/**
+ * A gap this long between checks means the app was closed or frozen (iOS
+ * suspends web apps instead of reloading them). We didn't see you during the
+ * gap, so it can't count towards a dwell.
+ */
+const MAX_GAP_MS = 2 * 60 * 1000
 
 interface Options {
   enabled: boolean
-  /** Called once per dwell when you've stayed put long enough. Return the visit id to close later. */
+  /** Called once per dwell when you've stayed put long enough. Return the visit id to close later, or null if nothing was logged. */
   onDwell: (at: LatLng, since: number) => Promise<string | null>
   /** Called when you walk away from a spot that was logged. */
   onLeave: (visitId: string) => void
 }
 
 /**
- * Logs a visit when you stay within ~75 m of one spot for 10+ minutes while the
- * app is open. iOS web apps can't track location in the background, so this only
- * sees fixes while Wander is on screen.
+ * Notices when you stay within ~75 m of one spot for 10+ minutes while the app
+ * is open. iOS web apps can't track location in the background, so only time
+ * Wander is actually on screen counts: reopening the app hours later in the
+ * same spot is not a dwell.
  */
 export function useAutoDetect(fix: Fix | null, { enabled, onDwell, onLeave }: Options) {
   const anchor = useRef<{ at: LatLng; since: number } | null>(null)
   const lastFixAt = useRef(0)
+  /** Last time the app was demonstrably running (a fix or a timer tick). */
+  const lastSeen = useRef(0)
   const loggedVisit = useRef<string | null>(null)
   const pending = useRef(false)
   const callbacks = useRef({ onDwell, onLeave })
@@ -34,7 +43,17 @@ export function useAutoDetect(fix: Fix | null, { enabled, onDwell, onLeave }: Op
     callbacks.current = { onDwell, onLeave }
   })
 
+  /** Restart the dwell clock if the app was away; returns true if it did. */
+  const resumeGap = useRef(() => {
+    const now = Date.now()
+    const away = lastSeen.current && now - lastSeen.current > MAX_GAP_MS
+    lastSeen.current = now
+    if (away && anchor.current && !loggedVisit.current) anchor.current = { ...anchor.current, since: now }
+    return !!away
+  })
+
   const checkDwell = useRef(() => {
+    if (resumeGap.current()) return
     const a = anchor.current
     const now = Date.now()
     if (!a || loggedVisit.current || pending.current) return
@@ -56,6 +75,9 @@ export function useAutoDetect(fix: Fix | null, { enabled, onDwell, onLeave }: Op
       return
     }
     if (!fix || fix.accuracy > MAX_ACCURACY_M) return
+    // A cached fix from before the app was reopened says nothing about now.
+    if (Date.now() - fix.timestamp > MAX_GAP_MS) return
+    resumeGap.current()
     const here = { lat: fix.lat, lng: fix.lng }
     lastFixAt.current = Date.now()
 
@@ -70,7 +92,17 @@ export function useAutoDetect(fix: Fix | null, { enabled, onDwell, onLeave }: Op
 
   useEffect(() => {
     if (!enabled) return
+    lastSeen.current = Date.now()
     const id = setInterval(() => checkDwell.current(), CHECK_EVERY_MS)
-    return () => clearInterval(id)
+    // Going to the background ends what we can observe; start fresh on return.
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden' && anchor.current && !loggedVisit.current) anchor.current = null
+      lastSeen.current = Date.now()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [enabled])
 }

@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ArrowUpRight, Camera, Footprints, ImagePlus, Minus, Plus, Trash } from 'lucide-react'
+import { ArrowUpRight, Camera, Check, Footprints, ImagePlus, Minus, PenLine, Plus, Trash } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { usePhotoUrls, type PlaceWithStats } from '../hooks/useData'
@@ -16,6 +16,8 @@ import Sheet from '../ui/Sheet'
 interface Props {
   visitId: string
   place: PlaceWithStats
+  /** Just checked in: lead with the three things worth adding and end with "Done". */
+  fresh?: boolean
   onOpenPlace(): void
   notify(text: string, tone?: 'info' | 'success' | 'error'): void
   onClose(): void
@@ -34,7 +36,7 @@ function useAutosize(ref: React.RefObject<HTMLTextAreaElement | null>, value: st
 }
 
 /** One check-in as a memory: a note, your steps, and photos (backed up encrypted when you're signed in). */
-export default function VisitSheet({ visitId, place, onOpenPlace, notify, onClose }: Props) {
+export default function VisitSheet({ visitId, place, fresh = false, onOpenPlace, notify, onClose }: Props) {
   const confirm = useConfirm()
   const visit = useLiveQuery(() => db.visits.get(visitId), [visitId])
   const photos = usePhotoUrls(visitId)
@@ -44,6 +46,7 @@ export default function VisitSheet({ visitId, place, onOpenPlace, notify, onClos
   const [viewing, setViewing] = useState<number | null>(null)
   const input = useRef<HTMLInputElement>(null)
   const area = useRef<HTMLTextAreaElement>(null)
+  const stepsInput = useRef<HTMLInputElement>(null)
 
   // Start from the saved note once it loads; after that the field is yours.
   const value = note ?? visit?.note ?? ''
@@ -108,13 +111,43 @@ export default function VisitSheet({ visitId, place, onOpenPlace, notify, onClos
     onClose()
   }
 
+  const focusField = (el: HTMLElement | null) => {
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.focus({ preventScroll: true })
+  }
+
+  const hasNote = !!value.trim()
+  const memorySteps = [
+    {
+      key: 'photos',
+      icon: Camera,
+      label: 'Photos',
+      done: photos.length > 0,
+      status: photos.length ? `${photos.length} added` : 'Add',
+      act: () => input.current?.click(),
+    },
+    { key: 'note', icon: PenLine, label: 'Note', done: hasNote, status: hasNote ? 'Written' : 'Write', act: () => focusField(area.current) },
+    {
+      key: 'steps',
+      icon: Footprints,
+      label: 'Steps',
+      done: !!visit.steps,
+      status: visit.steps ? fmtSteps(visit.steps) : 'Log',
+      act: () => focusField(stepsInput.current),
+    },
+  ]
+  const doneCount = memorySteps.filter((m) => m.done).length
+  // Shown right after a check-in, and on any visit that's still missing something.
+  const showGuide = fresh || doneCount < memorySteps.length
+
   const items: PhotoItem[] = photos.map(({ photo, url }) => ({ id: photo.id, url, label: shortDate(visit.arrivedAt) }))
 
   return (
     <Sheet
       onClose={onClose}
       leading={<IconTile icon={categoryIcon(place.category)} color={place.level.color} size={48} />}
-      eyebrow={`${dayLabel(visit.arrivedAt)} · ${timeOfDay(visit.arrivedAt)}${visit.leftAt ? ` · ${duration(visit.leftAt - visit.arrivedAt)}` : ''}`}
+      eyebrow={`${fresh ? 'Checked in' : dayLabel(visit.arrivedAt)} · ${timeOfDay(visit.arrivedAt)}${visit.leftAt ? ` · ${duration(visit.leftAt - visit.arrivedAt)}` : ''}`}
       title={place.name}
       footer={
         <div className="btn-row">
@@ -122,11 +155,62 @@ export default function VisitSheet({ visitId, place, onOpenPlace, notify, onClos
             <Trash size={18} strokeWidth={2.2} />
           </motion.button>
           <motion.button className="btn grow" onClick={onOpenPlace} whileTap={{ scale: 0.97 }}>
-            Open place <ArrowUpRight size={17} strokeWidth={2.3} />
+            {fresh ? 'View place' : 'Open place'} <ArrowUpRight size={17} strokeWidth={2.3} />
           </motion.button>
+          {fresh && (
+            <motion.button className="btn primary grow" onClick={onClose} whileTap={{ scale: 0.97 }}>
+              <Check size={18} strokeWidth={2.6} /> Done
+            </motion.button>
+          )}
         </div>
       }
     >
+      {showGuide && (
+        <section className="memory-guide" aria-label="Make this visit a memory">
+          <div className="memory-guide-head">
+            <strong>{fresh && doneCount === 0 ? 'Make it a memory' : doneCount === memorySteps.length ? 'All set' : 'Add to this visit'}</strong>
+            <small>
+              {doneCount} of {memorySteps.length}
+            </small>
+          </div>
+          <div className="memory-steps">
+            {memorySteps.map((m, i) => {
+              const Icon = m.icon
+              return (
+                <motion.button
+                  key={m.key}
+                  className={`memory-step ${m.done ? 'is-done' : ''}`}
+                  onClick={m.act}
+                  disabled={m.key === 'photos' && busy}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.06 * i + 0.08, type: 'spring', stiffness: 420, damping: 30 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  <span className="memory-step-icon">
+                    <AnimatePresence mode="popLayout" initial={false}>
+                      {m.key === 'photos' && busy ? (
+                        <span key="busy" className="spinner" />
+                      ) : m.done ? (
+                        <motion.span key="done" initial={{ scale: 0.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.4, opacity: 0 }}>
+                          <Check size={18} strokeWidth={3} />
+                        </motion.span>
+                      ) : (
+                        <motion.span key="icon" initial={{ scale: 0.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.4, opacity: 0 }}>
+                          <Icon size={19} strokeWidth={2.2} />
+                        </motion.span>
+                      )}
+                    </AnimatePresence>
+                  </span>
+                  <strong>{m.label}</strong>
+                  <small>{m.status}</small>
+                </motion.button>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
       {/* Photos first: they're the memory. */}
       <section className="visit-photos">
         {items.length ? (
@@ -138,11 +222,13 @@ export default function VisitSheet({ visitId, place, onOpenPlace, notify, onClos
             </button>
           </>
         ) : (
-          <motion.button className="photo-add-hero" onClick={() => input.current?.click()} disabled={busy} whileTap={{ scale: 0.98 }}>
-            {busy ? <span className="spinner" /> : <Camera size={24} strokeWidth={2} />}
-            <strong>Add photos</strong>
-            <small>They show up on the map pin and in your journal.</small>
-          </motion.button>
+          !showGuide && (
+            <motion.button className="photo-add-hero" onClick={() => input.current?.click()} disabled={busy} whileTap={{ scale: 0.98 }}>
+              {busy ? <span className="spinner" /> : <Camera size={24} strokeWidth={2} />}
+              <strong>Add photos</strong>
+              <small>They show up on the map pin and in your journal.</small>
+            </motion.button>
+          )
         )}
         <input ref={input} type="file" accept="image/*" multiple hidden onChange={(e) => onFiles(e.target.files)} />
       </section>
@@ -154,7 +240,7 @@ export default function VisitSheet({ visitId, place, onOpenPlace, notify, onClos
           value={value}
           maxLength={MAX_NOTE}
           rows={2}
-          placeholder="Got the pistachio croissant…"
+          placeholder="What happened here? Got the pistachio croissant…"
           onChange={(e) => setNote(e.target.value)}
         />
         <AnimatePresence>
@@ -173,6 +259,7 @@ export default function VisitSheet({ visitId, place, onOpenPlace, notify, onClos
             <Footprints size={18} strokeWidth={2.2} />
           </span>
           <input
+            ref={stepsInput}
             inputMode="numeric"
             pattern="[0-9]*"
             placeholder="How many steps?"

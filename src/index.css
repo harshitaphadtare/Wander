@@ -2485,3 +2485,115 @@ button.group-row:active:not(:disabled) {
     pointer-events: auto;
   }
 }
+
+/* ============ Visit: "make it a memory" guide ============ */
+.memory-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.memory-guide-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 2px;
+}
+.memory-guide-head strong {
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 400;
+  line-height: 1.1;
+}
+.memory-guide-head small {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.memory-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.memory-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 14px 6px 12px;
+  border-radius: 18px;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 38%, var(--surface-3));
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+  text-align: center;
+  transition: background 0.25s, border-color 0.25s;
+}
+.memory-step-icon {
+  width: 38px;
+  height: 38px;
+  margin-bottom: 6px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  transition: background 0.25s, color 0.25s;
+}
+.memory-step strong {
+  font-size: 14.5px;
+  font-weight: 620;
+  color: var(--ink);
+}
+.memory-step small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--accent);
+  font-weight: 560;
+}
+.memory-step.is-done {
+  border-style: solid;
+  border-color: transparent;
+  background: var(--surface-2);
+}
+.memory-step.is-done .memory-step-icon {
+  background: color-mix(in srgb, #12a187 16%, transparent);
+  color: #12a187;
+}
+.memory-step.is-done small {
+  color: var(--ink-3);
+}
+
+/* Place sheet: nudge back to today's visit */
+.today-visit {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-2));
+  text-align: left;
+}
+.today-visit > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.today-visit strong {
+  font-size: 15px;
+  font-weight: 620;
+}
+.today-visit small {
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.today-visit .chev {
+  color: var(--ink-3);
+}
+.list-open {
+  align-self: flex-start;
+}

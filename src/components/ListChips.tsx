@@ -1,13 +1,16 @@
-import { Check, Plus } from 'lucide-react'
+import { Check, ListPlus, Pencil, Plus } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useState } from 'react'
 import type { List } from '../lib/db'
 import { createList, toggleList } from '../lib/places'
 
-const SUGGESTED = ['Rainy day', 'Date spots', 'Work cafés', 'Take visitors']
-
-/** Which of your lists this place is on; tap to add or remove, or start a new list inline. */
+/**
+ * Lists are your own groups of places ("Brunch spots", "Take visitors"). Folded
+ * away until you ask for it: the place's lists show as chips, and "Add to a
+ * list" opens the picker.
+ */
 export default function ListChips({ placeId, listIds, lists }: { placeId: string; listIds: string[]; lists: List[] }) {
+  const [open, setOpen] = useState(false)
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
   const on = new Set(listIds)
@@ -22,17 +25,28 @@ export default function ListChips({ placeId, listIds, lists }: { placeId: string
     if (!on.has(list.id)) await toggleList(placeId, list.id)
   }
 
-  // First time: offer a few starter lists so the feature explains itself.
-  const suggestions = lists.length === 0 ? SUGGESTED : []
+  const shown = open ? lists : lists.filter((l) => on.has(l.id))
+
+  if (!open && shown.length === 0) {
+    return (
+      <motion.button layout className="chip ghost list-open" onClick={() => setOpen(true)} whileTap={{ scale: 0.94 }}>
+        <ListPlus size={14} strokeWidth={2.4} /> Add to a list
+      </motion.button>
+    )
+  }
 
   return (
     <section>
       <div className="list-label">Lists</div>
-      {on.size === 0 && (
-        <p className="lists-hint">Your own collections, like “Rainy day” or “Date spots”. Tap one to add this place; open them from Places.</p>
+      {open && (
+        <p className="lists-hint">
+          {lists.length === 0
+            ? 'Group places your own way, like “Brunch spots” or “Take visitors”. Name your first list below; you’ll find it in Places.'
+            : 'Tap a list to add or remove this place. Browse your lists from Places.'}
+        </p>
       )}
       <div className="chips wrap">
-        {lists.map((l) => {
+        {shown.map((l) => {
           const active = on.has(l.id)
           return (
             <motion.button
@@ -54,12 +68,11 @@ export default function ListChips({ placeId, listIds, lists }: { placeId: string
             </motion.button>
           )
         })}
-        {suggestions.map((s) => (
-          <motion.button key={s} layout className="chip ghost" onClick={() => create(s)} whileTap={{ scale: 0.94 }}>
-            <Plus size={13} strokeWidth={2.6} /> {s}
+        {!open ? (
+          <motion.button layout className="chip ghost" onClick={() => setOpen(true)} whileTap={{ scale: 0.94 }}>
+            <Pencil size={12} strokeWidth={2.6} /> Edit
           </motion.button>
-        ))}
-        {adding ? (
+        ) : adding || lists.length === 0 ? (
           <motion.form
             layout
             className="chip-input"
@@ -70,7 +83,7 @@ export default function ListChips({ placeId, listIds, lists }: { placeId: string
               void create(name)
             }}
           >
-            <input autoFocus value={name} maxLength={40} placeholder="List name" onChange={(e) => setName(e.target.value)} onBlur={() => create(name)} />
+            <input autoFocus={adding} value={name} maxLength={40} placeholder="New list name" onChange={(e) => setName(e.target.value)} onBlur={() => create(name)} />
           </motion.form>
         ) : (
           <motion.button layout className="chip ghost" onClick={() => setAdding(true)} whileTap={{ scale: 0.94 }}>

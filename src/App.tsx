@@ -9,7 +9,7 @@ import FogBar, { type MapMode } from './components/FogBar'
 import HeatBar from './components/HeatBar'
 import JournalPanel from './components/JournalPanel'
 import MapView, { type MapHandle, type Padding, type StopMarker } from './components/MapView'
-import NearbyPrompt from './components/NearbyPrompt'
+import NearbyPrompt, { DwellPrompt } from './components/NearbyPrompt'
 import PickPlaceSheet, { type PickChoice } from './components/PickPlaceSheet'
 import { ResultSheet, SavedPlaceSheet } from './components/PlaceSheet'
 import PlacesPanel from './components/PlacesPanel'
@@ -34,7 +34,7 @@ import { weeklyStreak } from './lib/streak'
 import type { WrappedPeriod } from './lib/wrapped'
 import { periodStart, type Period } from './lib/periods'
 import { levelFor } from './lib/levels'
-import { reverseGeocode, type PhotonPlace } from './lib/photon'
+import type { PhotonPlace } from './lib/photon'
 import {
   countVisits,
   endVisit,
@@ -59,7 +59,8 @@ type SheetState =
   | { type: 'places' }
   | { type: 'journal' }
   | { type: 'explore' }
-  | { type: 'visit'; id: string }
+  /** `fresh`: just checked in, so the sheet leads with "add photos, a note, steps". */
+  | { type: 'visit'; id: string; fresh?: boolean }
   | { type: 'wrapped'; period: WrappedPeriod }
   | { type: 'settings' }
   | null
@@ -131,6 +132,8 @@ export default function App() {
   const [celebration, setCelebration] = useState<CelebrationData | null>(null)
   const [autoDetect, setAutoDetect] = useState(() => localStorage.getItem(AUTO_KEY) !== '0')
   const [dismissedNearby, setDismissedNearby] = useState<Set<string>>(new Set())
+  /** You've stayed somewhere that isn't one of your places: offer a check-in rather than guessing a name. */
+  const [dwellSpot, setDwellSpot] = useState<LatLng | null>(null)
   /** Shared by the Journal and the heatmap so they always show the same stretch of time. */
   const [period, setPeriod] = useState<Period>('week')
   const [heatOn, setHeatOn] = useState(false)
@@ -215,7 +218,7 @@ export default function App() {
       if (!ok) return
     }
     const before = await countVisits(placeId)
-    await logVisit(placeId, 'check-in')
+    const visit = await logVisit(placeId, 'check-in')
     const after = before + 1
     const [oldLevel, newLevel] = [levelFor(before), levelFor(after)]
     navigator.vibrate?.(20)
@@ -224,7 +227,9 @@ export default function App() {
     } else {
       notify(`Checked in at ${name}`, 'success')
     }
-    setSheet({ type: 'place', id: placeId })
+    setDwellSpot(null)
+    // Straight to the visit, so adding photos / a note / steps is the obvious next step.
+    setSheet({ type: 'visit', id: visit.id, fresh: true })
   }
 
   const withBusy = async (fn: () => Promise<void>) => {
@@ -370,23 +375,15 @@ export default function App() {
   // ---- Auto-detect: stayed put for 10+ min while the app was open ----
   const onDwell = useCallback(
     async (at: LatLng, since: number): Promise<string | null> => {
-      const nearby = await findNearbyPlaces(at, SAME_PLACE_RADIUS_M)
-      let place = nearby[0]?.place
-      if (place) {
-        const last = await lastVisitTo(place.id)
-        if (last && since - last.arrivedAt < 2 * 3_600_000) return null // already logged recently
-      } else {
-        let input: PlaceInput = { name: 'Unnamed spot', lat: at.lat, lng: at.lng }
-        try {
-          const close = (await reverseGeocode(at)).filter((p) => distanceM(at, p) <= SAME_PLACE_RADIUS_M)
-          const poi = close.find((p) => p.category)
-          if (poi) input = poi
-          else if (close[0]) input = { ...input, name: `Spot near ${close[0].name}` }
-        } catch {
-          // Offline: keep the unnamed spot; it can be renamed later.
-        }
-        place = await savePlace(input)
+      const place = (await findNearbyPlaces(at, SAME_PLACE_RADIUS_M))[0]?.place
+      if (!place) {
+        // Not one of your places. Guessing a name from the nearest POI used to log
+        // things like the car park next door, so ask instead.
+        setDwellSpot(at)
+        return null
       }
+      const last = await lastVisitTo(place.id)
+      if (last && since - last.arrivedAt < 2 * 3_600_000) return null // already logged recently
       const visit = await logVisit(place.id, 'auto', since)
       notify(`Auto-logged a visit to ${place.name}`, 'success')
       return visit.id
@@ -557,6 +554,7 @@ export default function App() {
   const mapMode = heatOn || !!fogAt
   const toggleTab = (t: Tab) => setSheet(tab === t ? null : { type: t })
   const showNearby = !!nearbyPlace && !sheet && !mapMode
+  const showDwell = !showNearby && !!dwellSpot && !sheet && !mapMode
 
   const renderSheet = () => {
     switch (sheet?.type) {
@@ -646,7 +644,15 @@ export default function App() {
         const v = visits?.find((x) => x.id === sheet.id)
         const p = v && allPlaces.find((x) => x.id === v.placeId)
         return p ? (
-          <VisitSheet key={sheetKey(sheet)} visitId={sheet.id} place={p} notify={notify} onOpenPlace={() => openPlace(p)} onClose={close} />
+          <VisitSheet
+            key={sheetKey(sheet)}
+            visitId={sheet.id}
+            place={p}
+            fresh={!!sheet.fresh}
+            notify={notify}
+            onOpenPlace={() => openPlace(p)}
+            onClose={close}
+          />
         ) : null
       }
       case 'wrapped':
@@ -680,7 +686,7 @@ export default function App() {
 
   return (
     <div
-      className={`app ${sheet ? 'has-sheet' : ''} ${sheet && !tab && sheet.type !== 'settings' ? 'has-detail' : ''} ${showNearby ? 'has-nearby' : ''} ${mapMode ? 'has-heat' : ''}`}
+      className={`app ${sheet ? 'has-sheet' : ''} ${sheet && !tab && sheet.type !== 'settings' ? 'has-detail' : ''} ${showNearby || showDwell ? 'has-nearby' : ''} ${mapMode ? 'has-heat' : ''}`}
     >
       <MapView
         ref={map}
@@ -778,6 +784,17 @@ export default function App() {
             onOpen={() => openPlace(nearbyPlace)}
             onCheckIn={() => withBusy(() => checkIn(nearbyPlace.id, nearbyPlace.name, nearbyPlace))}
             onDismiss={() => setDismissedNearby((s) => new Set(s).add(nearbyPlace.id))}
+          />
+        )}
+        {showDwell && (
+          <DwellPrompt
+            key="dwell"
+            onCheckIn={() => {
+              setSheet({ type: 'pick', mode: 'here', at: dwellSpot, accuracy: geo.fix?.accuracy })
+              flyTo(dwellSpot, true, 17)
+              setDwellSpot(null)
+            }}
+            onDismiss={() => setDwellSpot(null)}
           />
         )}
       </AnimatePresence>

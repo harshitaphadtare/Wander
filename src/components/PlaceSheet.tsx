@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Bookmark, Check, Footprints, MapPinPlus, Pencil, Tag, Trash } from 'lucide-react'
+import { Bookmark, Camera, Check, ChevronRight, Footprints, MapPinPlus, Pencil, Tag, Trash } from 'lucide-react'
 import { AnimatePresence } from 'motion/react'
 import { motion } from 'motion/react'
 import { useState } from 'react'
@@ -73,6 +73,9 @@ export function SavedPlaceSheet({ place, from, lists, busy, onVisit, onCheckIn, 
         .then((vs) => vs.reduce((sum, v) => sum + (v.steps ?? 0), 0)),
     [place.id],
   )
+  // Today's visit, so coming back to add photos or a note is one tap.
+  const today = recent?.[0] && new Date(recent[0].arrivedAt).toDateString() === new Date().toDateString() ? recent[0] : null
+  const todayPhotos = useLiveQuery(() => (today ? db.photos.where('visitId').equals(today.id).count() : 0), [today?.id])
   const next = nextLevel(place.visitCount)
   const LevelIcon = LEVEL_ICONS[place.level.key]
 
@@ -136,6 +139,21 @@ export function SavedPlaceSheet({ place, from, lists, busy, onVisit, onCheckIn, 
         </div>
       }
     >
+      {today && (
+        <motion.button className="today-visit" onClick={() => onVisit(today.id)} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} whileTap={{ scale: 0.98 }}>
+          <IconTile icon={Camera} color="var(--accent)" size={40} />
+          <span>
+            <strong>Today’s visit · {timeOfDay(today.arrivedAt)}</strong>
+            <small>
+              {[todayPhotos ? plural(todayPhotos, 'photo') : null, today.note ? 'note' : null, today.steps ? `${fmtSteps(today.steps)} steps` : null]
+                .filter(Boolean)
+                .join(' · ') || 'Add photos, a note or your steps'}
+            </small>
+          </span>
+          <ChevronRight size={18} strokeWidth={2.3} className="chev" />
+        </motion.button>
+      )}
+
       {memories.length > 0 && (
         <section className="place-memories">
           <div className="list-label">

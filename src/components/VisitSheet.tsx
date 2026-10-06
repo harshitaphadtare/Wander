@@ -1,12 +1,13 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ArrowUpRight, Camera, Check, Footprints, ImagePlus, Minus, PenLine, Plus, Trash } from 'lucide-react'
+import { ArrowUpRight, Camera, Check, CloudOff, CloudUpload, Footprints, ImagePlus, Minus, PenLine, Plus, RefreshCw, Trash } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { usePhotoUrls, type PlaceWithStats } from '../hooks/useData'
 import { db } from '../lib/db'
 import { dayLabel, duration, shortDate, steps as fmtSteps, timeOfDay } from '../lib/format'
 import { addPhotos, removePhoto } from '../lib/photos'
 import { deleteVisit, setVisitNote, setVisitSteps } from '../lib/places'
+import { syncNow, syncStore } from '../lib/sync'
 import { IconTile } from '../ui/bits'
 import { useConfirm } from '../ui/Confirm'
 import { categoryIcon } from '../ui/icons'
@@ -40,6 +41,7 @@ export default function VisitSheet({ visitId, place, fresh = false, onOpenPlace,
   const confirm = useConfirm()
   const visit = useLiveQuery(() => db.visits.get(visitId), [visitId])
   const photos = usePhotoUrls(visitId)
+  const sync = useSyncExternalStore(syncStore.subscribe, syncStore.get)
   const [note, setNote] = useState<string | null>(null)
   const [stepsDraft, setStepsDraft] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -117,14 +119,22 @@ export default function VisitSheet({ visitId, place, fresh = false, onOpenPlace,
     el.focus({ preventScroll: true })
   }
 
+  // Photos this visit lists but this device doesn't have yet (added on another device),
+  // and photos added here that haven't reached the cloud.
+  const local = new Set(photos.map((p) => p.photo.id))
+  const arriving = (visit.photoIds ?? []).filter((id) => !local.has(id)).length
+  const syncing = sync.status !== 'disabled' && sync.status !== 'signed-out'
+  const unsent = syncing ? photos.filter((p) => p.photo.uploaded !== 1).length : 0
+  const photoCount = photos.length + arriving
+
   const hasNote = !!value.trim()
   const memorySteps = [
     {
       key: 'photos',
       icon: Camera,
       label: 'Photos',
-      done: photos.length > 0,
-      status: photos.length ? `${photos.length} added` : 'Add',
+      done: photoCount > 0,
+      status: arriving ? `${arriving} on the way` : photos.length ? `${photos.length} added` : 'Add',
       act: () => input.current?.click(),
     },
     { key: 'note', icon: PenLine, label: 'Note', done: hasNote, status: hasNote ? 'Written' : 'Write', act: () => focusField(area.current) },
@@ -211,6 +221,31 @@ export default function VisitSheet({ visitId, place, fresh = false, onOpenPlace,
         </section>
       )}
 
+      {(arriving > 0 || unsent > 0) && (
+        <div className={`photo-sync ${sync.status === 'error' ? 'is-error' : ''}`}>
+          {sync.status === 'error' ? <CloudOff size={17} strokeWidth={2.2} /> : <CloudUpload size={17} strokeWidth={2.2} />}
+          <span>
+            <strong>
+              {arriving > 0
+                ? `${arriving === 1 ? '1 photo hasn’t' : `${arriving} photos haven’t`} arrived from your other device`
+                : `${unsent === 1 ? '1 photo isn’t' : `${unsent} photos aren’t`} backed up yet`}
+            </strong>
+            <small>
+              {sync.status === 'error'
+                ? sync.error
+                : sync.status === 'offline'
+                  ? 'You’re offline. They’ll sync when you’re back online.'
+                  : arriving > 0
+                    ? 'Open Wander on the device you took them on, so it can finish uploading.'
+                    : 'Keep Wander open for a moment while they upload.'}
+            </small>
+          </span>
+          <button className="icon-btn" onClick={() => void syncNow()} disabled={sync.status === 'syncing'} aria-label="Sync now">
+            <RefreshCw size={15} className={sync.status === 'syncing' ? 'spin' : ''} />
+          </button>
+        </div>
+      )}
+
       {/* Photos first: they're the memory. */}
       <section className="visit-photos">
         {items.length ? (
@@ -221,6 +256,11 @@ export default function VisitSheet({ visitId, place, fresh = false, onOpenPlace,
               Add more photos
             </button>
           </>
+        ) : arriving > 0 ? (
+          <button className="photo-add-row" onClick={() => input.current?.click()} disabled={busy}>
+            {busy ? <span className="spinner" /> : <ImagePlus size={17} strokeWidth={2.2} />}
+            Add more photos
+          </button>
         ) : (
           !showGuide && (
             <motion.button className="photo-add-hero" onClick={() => input.current?.click()} disabled={busy} whileTap={{ scale: 0.98 }}>

@@ -2597,3 +2597,35 @@ button.group-row:active:not(:disabled) {
 .list-open {
   align-self: flex-start;
 }
+
+/* Visit: photos still syncing between devices */
+.photo-sync {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 10px 12px 14px;
+  border-radius: 16px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+.photo-sync > span {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.photo-sync strong {
+  font-size: 14px;
+  font-weight: 620;
+  color: var(--ink);
+}
+.photo-sync small {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--ink-3);
+}
+.photo-sync.is-error {
+  background: color-mix(in srgb, #d93a2b 8%, var(--surface-2));
+  color: #d93a2b;
+}
